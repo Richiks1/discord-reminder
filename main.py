@@ -35,8 +35,8 @@ async def send_reminder():
     if channel:
         await channel.send(
             "⚠️ **VORSICHT VOR BETRÜGERN** ⚠️\n\n"
-            "Es kann sein das ihr von einem „Henry Frempong“ hier auf Discord eine Freundschaftsanfrage erhaltet. **Das bin nicht ich!!!**\n\n"
-            "Ich schicke euch **niemals** eine Anfrage oder eine DM!\n\n"
+            "Es kann sein das ihr von einem „Henry Frempong“ hier auf Discord eine Freundschaftsanfrage erhaltet. **Das bin nicht ich!!!** \n\n"
+            "Ich schicke euch niemals eine Anfrage oder eine DM!\n\n"
             "Vielen Dank 🫡\n\n"
             "@everyone"
         )
