@@ -33,20 +33,13 @@ async def on_ready():
 async def send_reminder():
     channel = client.get_channel(CHANNEL_ID)
     if channel:
-        # Send the reminder message with @everyone on its own line
         await channel.send(
-            "@everyone\n"
-            "Owner and moderators will **never DM you first**.\n"
-            "If you need support, please use the #tickets channel.\n"
-            "Stay safe and avoid scams!"
+            "⚠️ **VORSICHT VOR BETRÜGERN** ⚠️\n\n"
+            "Es kann sein das ihr von einem „Henry Frempong“ hier auf Discord eine Freundschaftsanfrage erhaltet. **Das bin nicht ich!!!**\n\n"
+            "Ich schicke euch **niemals** eine Anfrage oder eine DM!\n\n"
+            "Vielen Dank 🫡\n\n"
+            "@everyone"
         )
-        # Send the image attachment (make sure reminder_image.png is in your project folder)
-        try:
-            with open("zzz.png", "rb") as image:
-                file = discord.File(image)
-                await channel.send(file=file)
-        except FileNotFoundError:
-            print("❌ reminder_image.png not found!")
     else:
         print("❌ Channel not found!")
 
