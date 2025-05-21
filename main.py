@@ -29,15 +29,24 @@ async def on_ready():
     print(f'✅ Logged in as {client.user}')
     send_reminder.start()
 
-@tasks.loop(seconds=30)  # Change to hours=6 when done testing
+@tasks.loop(hours=6)  # Reminder every 6 hours
 async def send_reminder():
     channel = client.get_channel(CHANNEL_ID)
     if channel:
+        # Send the reminder message with @everyone on its own line
         await channel.send(
-            "@everyone **Reminder:** Owner and moderators will **never DM you first**. "
-            "If you need support, please use the #tickets channel. "
+            "@everyone\n"
+            "Owner and moderators will **never DM you first**.\n"
+            "If you need support, please use the #tickets channel.\n"
             "Stay safe and avoid scams!"
         )
+        # Send the image attachment (make sure reminder_image.png is in your project folder)
+        try:
+            with open("zzz.png", "rb") as image:
+                file = discord.File(image)
+                await channel.send(file=file)
+        except FileNotFoundError:
+            print("❌ reminder_image.png not found!")
     else:
         print("❌ Channel not found!")
 
