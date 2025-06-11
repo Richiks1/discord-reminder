@@ -6,16 +6,13 @@ import json
 import os
 import io
 import asyncio
+from flask import Flask
+from threading import Thread
 
 # --- Configuration ---
 # IMPORTANT: Create a file named .env in the same directory as this script
 # and add your bot token like this:
 # DISCORD_TOKEN=YourActualBotTokenGoesHere
-#
-# You also need to set the channel IDs for your server.
-# To get a channel ID, right-click the channel in Discord and select "Copy Channel ID".
-# You must enable Developer Mode in your Discord settings for this option to appear.
-# (Settings -> Advanced -> Developer Mode)
 
 try:
     from dotenv import load_dotenv
@@ -25,8 +22,8 @@ except ImportError:
     print("dotenv library not found. Please install it with 'pip install python-dotenv'")
     TOKEN = None # Set your token here directly if you don't use a .env file
 
-ADMIN_CHANNEL_ID = 1219283442315952148  # <<< CHANGE THIS to your private mod/admin channel ID
-ANNOUNCEMENT_CHANNEL_ID = 815577373583736845 # <<< CHANGE THIS to your public announcement channel ID
+ADMIN_CHANNEL_ID = 1219283442315952148
+ANNOUNCEMENT_CHANNEL_ID = 815577373583736845
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
@@ -48,23 +45,44 @@ QUEST_COORDINATES = {
     "sweet3": (360, 675, 675, 900),
     "sweet4": (685, 675, 1000, 900),
 }
+# NOTE: Without a persistent disk, this file will be reset when the bot restarts.
 QUEST_DATA_FILE = 'quests.json'
-BASE_IMAGE_FILE = 'questboard.png' # Make sure your image file is named this and is in the same folder
+BASE_IMAGE_FILE = 'questboard.png'
 
 # Quest Statuses: 'unclaimed', 'pending', 'completed'
 PENDING_COLOR = (255, 165, 0, 180)  # Orange, semi-transparent
 COMPLETED_COLOR = (255, 0, 0, 255) # Red, solid
 
+# --- Flask Web Server Setup ---
+# This small web server keeps the bot alive on free hosting platforms.
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive and running!"
+
+def run_flask():
+  app.run(host='0.0.0.0', port=8080)
+
+# --- Bot Logic ---
+
 def get_quest_data():
     """Loads quest completion status from the JSON file."""
     if not os.path.exists(QUEST_DATA_FILE):
-        # Create a default file if it doesn't exist
         data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
         with open(QUEST_DATA_FILE, 'w') as f:
             json.dump(data, f, indent=4)
         return data
-    with open(QUEST_DATA_FILE, 'r') as f:
-        return json.load(f)
+    try:
+        with open(QUEST_DATA_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        # If file is corrupt or gone, create a new one
+        data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
+        with open(QUEST_DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+        return data
+
 
 def save_quest_data(data):
     """Saves quest completion status to the JSON file."""
@@ -87,24 +105,18 @@ def generate_quest_image():
         for name, data in quest_data.items():
             status = data['status']
             coords = QUEST_COORDINATES.get(name)
-            if not coords:
-                continue
+            if not coords: continue
 
             color = None
-            if status == 'pending':
-                color = PENDING_COLOR
-            elif status == 'completed':
-                color = COMPLETED_COLOR
+            if status == 'pending': color = PENDING_COLOR
+            elif status == 'completed': color = COMPLETED_COLOR
 
             if color:
                 x1, y1, x2, y2 = coords
-                # Draw a big 'X'
                 draw.line([(x1 + 10, y1 + 10), (x2 - 10, y2 - 10)], fill=color, width=15)
                 draw.line([(x2 - 10, y1 + 10), (x1 + 10, y2 - 10)], fill=color, width=15)
         
-        # Composite the overlay with the 'X's onto the base image
         img = Image.alpha_composite(img, overlay)
-
         buffer = io.BytesIO()
         img.convert("RGB").save(buffer, format='PNG')
         buffer.seek(0)
@@ -115,8 +127,6 @@ async def on_ready():
     """Event that runs when the bot is connected and ready."""
     print(f'Logged in as {bot.user.name}')
     print('Bot is ready to accept commands.')
-    if ADMIN_CHANNEL_ID == 123456789012345678 or ANNOUNCEMENT_CHANNEL_ID == 123456789012345678:
-        print("\n" + "="*50 + "\n!!! IMPORTANT !!!\nPlease change the ADMIN_CHANNEL_ID and ANNOUNCEMENT_CHANNEL_ID in the script.\n" + "="*50 + "\n")
     if not os.path.exists(BASE_IMAGE_FILE):
          print(f"Error: Base image '{BASE_IMAGE_FILE}' not found. Please place it in the same directory.")
 
@@ -129,7 +139,6 @@ async def list_quests(ctx):
     if buffer is None:
         await ctx.send(f"Sorry, the quest board image (`{BASE_IMAGE_FILE}`) is missing.")
         return
-        
     await ctx.send(file=discord.File(buffer, 'current_quests.png'))
 
 @bot.command(name='claim')
@@ -142,7 +151,7 @@ async def claim_quest(ctx, quest_name: str):
     quest_data = get_quest_data()
 
     if quest_name not in quest_data:
-        await ctx.send(f"'{quest_name}' is not a valid quest name. Please check the `!list` and try again.")
+        await ctx.send(f"'{quest_name}' is not a valid quest name. Please check `!list` and try again.")
         return
 
     if not ctx.message.attachments:
@@ -155,18 +164,15 @@ async def claim_quest(ctx, quest_name: str):
         await ctx.send(f"Sorry, quest '{quest_name}' is already '{quest_info['status']}' by {claimer_name}.")
         return
 
-    # --- Update state to PENDING ---
     quest_info['status'] = 'pending'
     quest_info['claimer_id'] = ctx.author.id
     quest_info['claimer_name'] = ctx.author.display_name
     save_quest_data(quest_data)
 
-    # --- Send Immediate Update ---
-    await ctx.send(f"⏳ {ctx.author.mention} has tentatively claimed **{quest_name}**! Your claim is now under review.")
+    await ctx.send(f"⏳ {ctx.author.mention} has claimed **{quest_name}**! Your claim is now under review.")
     buffer = generate_quest_image()
     await ctx.send(file=discord.File(buffer, 'current_quests.png'))
     
-    # --- Send to Admin Channel for Review ---
     admin_channel = bot.get_channel(ADMIN_CHANNEL_ID)
     if not admin_channel:
         print(f"Error: Could not find admin channel with ID {ADMIN_CHANNEL_ID}")
@@ -181,8 +187,8 @@ async def claim_quest(ctx, quest_name: str):
 
     try:
         msg = await admin_channel.send(embed=embed)
-        await msg.add_reaction("✅") # Approve
-        await msg.add_reaction("❌") # Deny
+        await msg.add_reaction("✅")
+        await msg.add_reaction("❌")
     except discord.Forbidden:
         print(f"Error: Missing permissions in admin channel {ADMIN_CHANNEL_ID}")
 
@@ -192,7 +198,7 @@ async def reset_quests(ctx):
     """(Admin Only) Resets all quests to 'unclaimed'."""
     default_data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
     save_quest_data(default_data)
-    await ctx.send("✅ All quests have been reset to 'unclaimed'.")
+    await ctx.send("✅ All quests have been reset.")
     buffer = generate_quest_image()
     await ctx.send("The quest board is now clean:", file=discord.File(buffer, 'current_quests.png'))
 
@@ -200,22 +206,17 @@ async def reset_quests(ctx):
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.user_id == bot.user.id or payload.channel_id != ADMIN_CHANNEL_ID:
-        return
+    if payload.user_id == bot.user.id or payload.channel_id != ADMIN_CHANNEL_ID: return
 
     channel = bot.get_channel(payload.channel_id)
-    try:
-        message = await channel.fetch_message(payload.message_id)
-    except discord.NotFound:
-        return
+    try: message = await channel.fetch_message(payload.message_id)
+    except discord.NotFound: return
 
-    if not message.embeds or message.author.id != bot.user.id or not ( "Pending" in message.embeds[0].title ):
-        return
+    if not message.embeds or message.author.id != bot.user.id or not ( "Pending" in message.embeds[0].title ): return
 
     guild = bot.get_guild(payload.guild_id)
     reactor = guild.get_member(payload.user_id)
-    if not reactor.guild_permissions.administrator:
-        return
+    if not reactor or not reactor.guild_permissions.administrator: return
 
     embed = message.embeds[0]
     quest_name = next((field.value for field in embed.fields if field.name == "Quest"), None)
@@ -223,9 +224,7 @@ async def on_raw_reaction_add(payload):
     claimer = guild.get_member(claimer_id)
     quest_data = get_quest_data()
 
-    if quest_name not in quest_data:
-        return
-        
+    if not quest_name or quest_name not in quest_data: return
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
 
     if str(payload.emoji) == "✅":
@@ -233,16 +232,13 @@ async def on_raw_reaction_add(payload):
         save_quest_data(quest_data)
 
         if announcement_channel:
-            congrats_msg = f"🎉 Congratulations to {claimer.mention} for completing the **{quest_name}** quest! Their claim has been approved."
+            congrats_msg = f"🎉 Congratulations to {claimer.mention} for completing **{quest_name}**! Approved."
             new_image_buffer = generate_quest_image()
             await announcement_channel.send(congrats_msg, file=discord.File(new_image_buffer, 'current_quests.png'))
         
-        new_embed = embed.copy()
-        new_embed.title = "✅ Quest Claim Approved"
-        new_embed.color = discord.Color.green()
+        new_embed = embed.copy(); new_embed.title = "✅ Quest Claim Approved"; new_embed.color = discord.Color.green()
         new_embed.add_field(name="Moderator", value=reactor.mention)
-        await message.edit(embed=new_embed)
-        await message.clear_reactions()
+        await message.edit(embed=new_embed); await message.clear_reactions()
 
     elif str(payload.emoji) == "❌":
         quest_data[quest_name]['status'] = 'unclaimed'
@@ -250,32 +246,38 @@ async def on_raw_reaction_add(payload):
         quest_data[quest_name]['claimer_name'] = None
         save_quest_data(quest_data)
 
-        if claimer:
-            await claimer.send(f"Sorry, your claim for the quest '{quest_name}' was denied. The quest is now available again.")
-
+        if claimer: await claimer.send(f"Sorry, your claim for '{quest_name}' was denied. The quest is now available again.")
         if announcement_channel:
-            denial_msg = f"ℹ️ The claim for **{quest_name}** by {claimer.mention} was denied. The quest is now open again!"
+            denial_msg = f"ℹ️ The claim for **{quest_name}** by {claimer.mention} was denied. The quest is now open!"
             new_image_buffer = generate_quest_image()
             await announcement_channel.send(denial_msg, file=discord.File(new_image_buffer, 'current_quests.png'))
 
-        new_embed = embed.copy()
-        new_embed.title = "❌ Quest Claim Denied"
-        new_embed.color = discord.Color.red()
+        new_embed = embed.copy(); new_embed.title = "❌ Quest Claim Denied"; new_embed.color = discord.Color.red()
         new_embed.add_field(name="Moderator", value=reactor.mention)
-        await message.edit(embed=new_embed)
-        await message.clear_reactions()
-
+        await message.edit(embed=new_embed); await message.clear_reactions()
 
 # --- Error Handling & Run ---
 @claim_quest.error
 async def claim_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("You need to specify which quest you're claiming! Usage: `!claim <quest_name>`")
+        await ctx.send("Usage: `!claim <quest_name>`")
 
-if TOKEN is None:
-    print("FATAL ERROR: Bot token is not configured. Please set DISCORD_TOKEN in your .env file.")
-else:
+def run_bot():
+    if TOKEN is None:
+        print("FATAL ERROR: Bot token not configured. Please set DISCORD_TOKEN in your .env file or as an environment variable.")
+        return
     try:
         bot.run(TOKEN)
+    except discord.errors.LoginFailure:
+        print("FATAL ERROR: Invalid Discord token.")
     except Exception as e:
-        print(f"An error occurred while running the bot: {e}")
+        print(f"An unexpected error occurred: {e}")
+
+if __name__ == "__main__":
+    # Start the Flask server in a new thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # Run the Discord bot in the main thread
+    run_bot()
