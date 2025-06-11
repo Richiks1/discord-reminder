@@ -144,6 +144,10 @@ async def on_ready():
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
     if announcement_channel:
         try:
+            # FIX: Added a 20-second delay before posting
+            print("Waiting 20 seconds before posting initial quest board...")
+            await asyncio.sleep(20)
+            
             print(f"Sending initial quest board to channel: {announcement_channel.name}")
             buffer = generate_quest_image()
             if buffer:
