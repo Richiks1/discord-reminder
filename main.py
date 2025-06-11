@@ -49,9 +49,10 @@ QUEST_COORDINATES = {
 QUEST_DATA_FILE = 'quests.json'
 BASE_IMAGE_FILE = 'questboard.png'
 
+# --- THIS IS THE FIX ---
 # Quest Statuses: 'unclaimed', 'pending', 'completed'
-PENDING_COLOR = (255, 165, 0, 200)  # Orange, semi-transparent
-COMPLETED_COLOR = (255, 0, 0, 255) # Red, solid
+PENDING_COLOR = (255, 165, 0, 200)      # Orange, semi-transparent
+COMPLETED_COLOR = (0, 255, 0, 255)     # Bright Green, solid (as per the new image)
 
 # --- Flask Web Server Setup ---
 app = Flask('')
@@ -116,11 +117,9 @@ def generate_quest_image():
             elif status == 'completed': 
                 color = COMPLETED_COLOR
                 # --- THIS IS THE FIX ---
-                # Adjusted values for a smaller 'X' that fits inside the box.
-                # Increased margin pulls the X's endpoints inward.
-                # A slightly thinner width also helps prevent overlap.
-                width = 25
-                margin = 45 
+                # New values to match the thick, green marker style from the example image.
+                width = 40  # Very thick line
+                margin = 20 # Small margin to make the X large
 
             if color:
                 x1, y1, x2, y2 = coords
