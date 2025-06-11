@@ -35,19 +35,23 @@ intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # --- Quest Data and Image Coordinates ---
+# --- FINAL, USER-PROVIDED COORDINATES ---
 QUEST_COORDINATES = {
-    "sweet1": (38, 195, 386, 420),
-    "wanted":   (411, 195, 759, 420),
-    "bigbass":  (784, 195, 1132, 420),
-    "vampy":    (38, 435, 386, 660),
-    "mines":    (411, 435, 759, 660),
-    "towers":   (784, 435, 1132, 660),
-    "sweet2":   (38, 675, 386, 900),
-    "sweet3":   (411, 675, 759, 900),
-    "sweet4":   (784, 675, 1132, 900),
+    "sweet1": (42, 174, 453, 368),
+    "wanted":   (476, 173, 886, 371),
+    "bigbass":  (911, 176, 1318, 365),
+    "vampy":    (42, 387, 454, 584),
+    "mines":    (476, 391, 883, 578),
+    "towers":   (910, 392, 1312, 578),
+    "sweet2":   (43, 605, 447, 791),
+    "sweet3":   (473, 603, 886, 796),
+    "sweet4":   (909, 603, 1317, 798),
 }
 QUEST_DATA_FILE = 'quests.json'
 BASE_IMAGE_FILE = 'questboard.png'
+
+# --- Define the fixed size for your overlay images ---
+FIXED_OVERLAY_SIZE = (400, 200) # Width: 400, Height: 200
 
 # Quest Statuses Color
 LEGACY_COMPLETED_COLOR = (255, 0, 0, 255) # Red, for old completions
@@ -97,7 +101,6 @@ def generate_quest_image():
     with Image.open(BASE_IMAGE_FILE) as base_img:
         img = base_img.copy().convert("RGBA")
         
-        # Create a separate layer for legacy X marks to avoid them getting blurred
         x_overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(x_overlay)
 
@@ -107,30 +110,35 @@ def generate_quest_image():
             if not coords: continue
 
             overlay_filename = None
-            # Determine which overlay file to use based on the status
             if status == 'pending':
                 overlay_filename = 'requested_overlay.png'
             elif status == 'completed':
                 overlay_filename = 'completed_overlay.png'
 
-            # If the status is one that uses a blur and overlay effect...
             if overlay_filename:
-                box_to_process = (coords[0], coords[1], coords[2], coords[3])
-                quest_box_area = img.crop(box_to_process)
+                # Ensure coordinates are in the correct order (x1, y1, x2, y2)
+                x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
+                
+                box_coords = (x1, y1, x2, y2)
+                box_width = x2 - x1
+                box_height = y2 - y1
+                
+                quest_box_area = img.crop(box_coords)
                 blurred_box = quest_box_area.filter(ImageFilter.GaussianBlur(radius=5))
-                img.paste(blurred_box, box_to_process)
+                img.paste(blurred_box, box_coords)
+
+                darken_layer = Image.new('RGBA', (box_width, box_height), (0, 0, 0, 96))
+                img.paste(darken_layer, box_coords, darken_layer)
                 
                 try:
                     overlay_img = Image.open(overlay_filename).convert("RGBA")
                     
-                    box_width = coords[2] - coords[0]
-                    target_overlay_width = int(box_width * 0.8)
-                    w_percent = (target_overlay_width / float(overlay_img.size[0]))
-                    h_size = int((float(overlay_img.size[1]) * float(w_percent)))
-                    overlay_img = overlay_img.resize((target_overlay_width, h_size), Image.Resampling.LANCZOS)
+                    # Resize overlay to your specified fixed size
+                    overlay_img = overlay_img.resize(FIXED_OVERLAY_SIZE, Image.Resampling.LANCZOS)
                     
-                    paste_x = coords[0] + (box_width - target_overlay_width) // 2
-                    paste_y = coords[1] + (coords[3] - coords[1] - h_size) // 2
+                    # Center the fixed-size overlay
+                    paste_x = x1 + (box_width - FIXED_OVERLAY_SIZE[0]) // 2
+                    paste_y = y1 + (box_height - FIXED_OVERLAY_SIZE[1]) // 2
                     paste_position = (paste_x, paste_y)
                     
                     img.paste(overlay_img, paste_position, overlay_img)
@@ -138,14 +146,13 @@ def generate_quest_image():
                 except FileNotFoundError:
                     print(f"ERROR: '{overlay_filename}' not found. Drawing a fallback rectangle.")
                     fallback_draw = ImageDraw.Draw(img)
-                    fallback_draw.rectangle(box_to_process, outline="red", width=5)
+                    fallback_draw.rectangle(box_coords, outline="red", width=5)
             
-            # Handle the old 'completed_legacy' status by drawing a red X
             elif status == 'completed_legacy':
-                draw.line([(coords[0]+30, coords[1]+30), (coords[2]-30, coords[3]-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
-                draw.line([(coords[2]-30, coords[1]+30), (coords[0]+30, coords[3]-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
+                x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
+                draw.line([(x1+30, y1+30), (x2-30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
+                draw.line([(x2-30, y1+30), (x1+30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
 
-        # After processing all boxes, composite the legacy X marks on top
         img = Image.alpha_composite(img, x_overlay)
 
         buffer = io.BytesIO()
