@@ -31,7 +31,6 @@ intents.messages = True
 intents.message_content = True
 intents.reactions = True
 intents.guilds = True
-# FIX: Added Members Intent to allow the bot to find users by ID for tagging.
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
@@ -47,7 +46,6 @@ QUEST_COORDINATES = {
     "sweet3": (360, 675, 675, 900),
     "sweet4": (685, 675, 1000, 900),
 }
-# NOTE: Without a persistent disk, this file will be reset when the bot restarts.
 QUEST_DATA_FILE = 'quests.json'
 BASE_IMAGE_FILE = 'questboard.png'
 
@@ -56,7 +54,6 @@ PENDING_COLOR = (255, 165, 0, 200)  # Orange, semi-transparent
 COMPLETED_COLOR = (255, 0, 0, 255) # Red, solid
 
 # --- Flask Web Server Setup ---
-# This small web server keeps the bot alive on free hosting platforms.
 app = Flask('')
 
 @app.route('/')
@@ -79,7 +76,6 @@ def get_quest_data():
         with open(QUEST_DATA_FILE, 'r') as f:
             return json.load(f)
     except (json.JSONDecodeError, FileNotFoundError):
-        # If file is corrupt or gone, create a new one
         data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
         with open(QUEST_DATA_FILE, 'w') as f:
             json.dump(data, f, indent=4)
@@ -111,27 +107,24 @@ def generate_quest_image():
 
             color = None
             
-            # FIX: New logic for width and margin to get the 'X' to fit perfectly.
-            width = 20  # Default width for pending
-            margin = 30 # Default margin for pending to make it appear smaller
+            # FIX: Adjusted width and margin values to properly fit the 'X' inside the box.
+            width = 15  # Default width for pending
+            margin = 40 # Default margin for pending to make it appear smaller
 
             if status == 'pending': 
                 color = PENDING_COLOR
             elif status == 'completed': 
                 color = COMPLETED_COLOR
-                # New values for a very thick, corner-to-corner 'X'
-                width = 40
-                margin = 20 # This should be half of the width to align the edges with the box
+                # New values for a thick, but contained 'X'
+                width = 30
+                margin = 25 # Increased margin to pull the larger 'X' inwards
 
             if color:
                 x1, y1, x2, y2 = coords
-                # The line starts/ends are adjusted by the margin
                 draw.line([(x1 + margin, y1 + margin), (x2 - margin, y2 - margin)], fill=color, width=width)
                 draw.line([(x2 - margin, y1 + margin), (x1 + margin, y2 - margin)], fill=color, width=width)
         
-        # Composite the overlay with the 'X's onto the base image
         img = Image.alpha_composite(img, overlay)
-
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
         buffer.seek(0)
@@ -149,9 +142,9 @@ async def on_ready():
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
     if announcement_channel:
         try:
-            # FIX: Added a 20-second delay before posting
-            print("Waiting 20 seconds before posting initial quest board...")
-            await asyncio.sleep(20)
+            # FIX: Reduced sleep time to 5 seconds as requested.
+            print("Waiting 5 seconds before posting initial quest board...")
+            await asyncio.sleep(5)
             
             print(f"Sending initial quest board to channel: {announcement_channel.name}")
             buffer = generate_quest_image()
@@ -206,9 +199,12 @@ async def claim_quest(ctx, quest_name: str):
     quest_info['claimer_name'] = ctx.author.display_name
     save_quest_data(quest_data)
 
-    await ctx.send(f"⏳ {ctx.author.mention} has claimed **{quest_name}**! Your claim is now under review.")
+    # FIX: Combined two messages into one to prevent double sending.
     buffer = generate_quest_image()
-    await ctx.send(file=discord.File(buffer, 'current_quests.png'))
+    await ctx.send(
+        f"⏳ {ctx.author.mention} has claimed **{quest_name}**! Your claim is now under review.",
+        file=discord.File(buffer, 'current_quests.png')
+    )
     
     admin_channel = bot.get_channel(ADMIN_CHANNEL_ID)
     if not admin_channel:
@@ -278,7 +274,6 @@ async def on_raw_reaction_add(payload):
     embed = message.embeds[0]
     quest_name = next((field.value for field in embed.fields if field.name == "Quest"), None)
     claimer_id = int(embed.footer.text.replace("Claimer ID: ", ""))
-    # FIX: Fetch the guild to reliably get the member object for tagging
     guild = bot.get_guild(payload.guild_id)
     claimer = None
     if guild:
