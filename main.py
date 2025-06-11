@@ -35,7 +35,6 @@ intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # --- Quest Data and Image Coordinates ---
-# --- FINAL, USER-PROVIDED COORDINATES ---
 QUEST_COORDINATES = {
     "sweet1": (42, 174, 453, 368),
     "wanted":   (476, 173, 886, 371),
@@ -116,7 +115,6 @@ def generate_quest_image():
                 overlay_filename = 'completed_overlay.png'
 
             if overlay_filename:
-                # Ensure coordinates are in the correct order (x1, y1, x2, y2)
                 x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
                 
                 box_coords = (x1, y1, x2, y2)
@@ -132,11 +130,8 @@ def generate_quest_image():
                 
                 try:
                     overlay_img = Image.open(overlay_filename).convert("RGBA")
-                    
-                    # Resize overlay to your specified fixed size
                     overlay_img = overlay_img.resize(FIXED_OVERLAY_SIZE, Image.Resampling.LANCZOS)
                     
-                    # Center the fixed-size overlay
                     paste_x = x1 + (box_width - FIXED_OVERLAY_SIZE[0]) // 2
                     paste_y = y1 + (box_height - FIXED_OVERLAY_SIZE[1]) // 2
                     paste_position = (paste_x, paste_y)
@@ -201,11 +196,12 @@ async def list_quests(ctx):
         return
     await ctx.send(file=discord.File(buffer, 'current_quests.png'))
 
+# --- THIS IS THE UPDATED COMMAND ---
 @bot.command(name='claim')
-async def claim_quest(ctx, quest_name: str):
+async def claim_quest(ctx, quest_name: str, proof_link: str = None):
     """
-    Claims a quest, marking it as 'pending'. Attach your proof (image/video).
-    Usage: !claim <quest_name>
+    Claims a quest, marking it as 'pending'. Attach proof or provide a link.
+    Usage: !claim <quest_name> [replay_link]
     """
     quest_name = quest_name.lower()
     quest_data = get_quest_data()
@@ -214,8 +210,9 @@ async def claim_quest(ctx, quest_name: str):
         await ctx.send(f"'{quest_name}' is not a valid quest name. Please check `!list` and try again.")
         return
 
-    if not ctx.message.attachments:
-        await ctx.send("You must attach proof (an image or video) to your claim!")
+    # Check for proof: either an attachment OR a link must be present
+    if not ctx.message.attachments and proof_link is None:
+        await ctx.send("You must attach proof (an image or video) or provide a replay link!")
         return
     
     quest_info = quest_data[quest_name]
@@ -244,7 +241,22 @@ async def claim_quest(ctx, quest_name: str):
     embed.add_field(name="Claimer", value=ctx.author.mention, inline=False)
     embed.add_field(name="Quest", value=quest_name, inline=False)
     embed.add_field(name="Original Message", value=f"[Jump to Message]({ctx.message.jump_url})", inline=False)
-    embed.set_image(url=ctx.message.attachments[0].url)
+    
+    # Add proof to the embed, preferring attachments
+    if ctx.message.attachments:
+        attachment = ctx.message.attachments[0]
+        # If the attachment is an image, display it. Otherwise, link to it.
+        if attachment.content_type and attachment.content_type.startswith('image/'):
+            embed.set_image(url=attachment.url)
+        else:
+            embed.add_field(name="Proof Attachment", value=f"[{attachment.filename}]({attachment.url})", inline=False)
+    elif proof_link:
+        embed.add_field(name="Proof Link", value=proof_link, inline=False)
+        # Try to set image if the link is a direct image link
+        image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+        if any(ext in proof_link.lower() for ext in image_extensions):
+            embed.set_image(url=proof_link)
+
     embed.set_footer(text=f"Claimer ID: {ctx.author.id}")
 
     try:
@@ -253,6 +265,7 @@ async def claim_quest(ctx, quest_name: str):
         await msg.add_reaction("❌")
     except discord.Forbidden:
         print(f"Error: Missing permissions in admin channel {ADMIN_CHANNEL_ID}")
+
 
 @bot.command(name='resetquests', hidden=True)
 @commands.has_permissions(administrator=True)
@@ -270,36 +283,24 @@ async def reset_quests(ctx):
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id: return
     
-    print(f"DEBUG: Reaction '{payload.emoji}' by {payload.member.display_name if payload.member else payload.user_id} in channel {payload.channel_id}")
-
     if payload.channel_id != ADMIN_CHANNEL_ID: return
-
-    print("DEBUG: Reaction is in the correct admin channel.")
     
     channel = bot.get_channel(payload.channel_id)
     try: 
         message = await channel.fetch_message(payload.message_id)
     except discord.NotFound: 
-        print("DEBUG: Reaction was on a message not found in cache.")
         return
 
     if not message.embeds or message.author.id != bot.user.id or not ( "Pending" in message.embeds[0].title ):
-        print("DEBUG: Reaction was on a message that is not a pending claim. Ignoring.")
         return
-
-    print("DEBUG: Reaction is on a valid pending claim message.")
 
     reactor = payload.member 
     if not reactor:
-        print(f"DEBUG: Could not identify the member who reacted.")
         return
 
     if not reactor.guild_permissions.manage_guild:
-        print(f"DEBUG: User {reactor.display_name} lacks 'Manage Server' permission to approve/deny.")
         return
     
-    print(f"DEBUG: User {reactor.display_name} has permissions. Processing action.")
-
     embed = message.embeds[0]
     quest_name = next((field.value for field in embed.fields if field.name == "Quest"), None)
     claimer_id = int(embed.footer.text.replace("Claimer ID: ", ""))
@@ -349,7 +350,7 @@ async def on_raw_reaction_add(payload):
 @claim_quest.error
 async def claim_error(ctx, error):
     if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("Usage: `!claim <quest_name>`")
+        await ctx.send("Usage: `!claim <quest_name> [replay_link]`")
 
 def run_bot():
     if TOKEN is None:
