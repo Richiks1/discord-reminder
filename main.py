@@ -24,9 +24,13 @@ intents.guilds = True
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# --- Path Configuration ---
-# This version saves to the temporary local directory, no disk required.
-QUEST_DATA_FILE = 'quests.json'
+# --- Path Configuration for Render's Persistent Storage ---
+if os.getenv('RENDER'):
+    DATA_DIR = '/data'
+else:
+    DATA_DIR = '.'
+
+QUEST_DATA_FILE = os.path.join(DATA_DIR, 'quests.json')
 BASE_IMAGE_FILE = 'questboard.png'
 
 # --- Quest Data and Image Coordinates ---
@@ -76,17 +80,20 @@ def run_flask():
 # --- Bot Logic ---
 def get_quest_data():
     if not os.path.exists(QUEST_DATA_FILE):
+        if not os.path.exists(DATA_DIR):
+            try:
+                os.makedirs(DATA_DIR)
+            except OSError as e:
+                print(f"CRITICAL ERROR trying to create data directory: {e}")
+                return None
         data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
-        with open(QUEST_DATA_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
+        with open(QUEST_DATA_FILE, 'w') as f: json.dump(data, f, indent=4)
         return data
     try:
-        with open(QUEST_DATA_FILE, 'r') as f:
-            return json.load(f)
+        with open(QUEST_DATA_FILE, 'r') as f: return json.load(f)
     except (json.JSONDecodeError, FileNotFoundError):
         data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
-        with open(QUEST_DATA_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
+        with open(QUEST_DATA_FILE, 'w') as f: json.dump(data, f, indent=4)
         return data
 
 def save_quest_data(data):
@@ -95,18 +102,25 @@ def save_quest_data(data):
 
 def generate_quest_image():
     quest_data = get_quest_data()
-    if quest_data is None:
-        print("ERROR: Quest data is None. Cannot generate image.")
-        return None
-        
-    if not os.path.exists(BASE_IMAGE_FILE):
-        print(f"ERROR: Base image '{BASE_IMAGE_FILE}' not found.")
-        return None
+    if quest_data is None: return None
+    if not os.path.exists(BASE_IMAGE_FILE): return None
     
     with Image.open(BASE_IMAGE_FILE) as base_img:
         img = base_img.copy().convert("RGBA")
+        
+        # Create a separate draw object for writing text onto the main image
+        text_draw = ImageDraw.Draw(img)
+        
+        # Load the font for writing the user's name
+        try:
+            font = ImageFont.truetype("arial.ttf", 20)
+        except IOError:
+            print("WARNING: arial.ttf not found. Using default font.")
+            font = ImageFont.load_default()
+
+        # Create a layer for legacy X marks
         x_overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
-        draw = ImageDraw.Draw(x_overlay)
+        draw_x = ImageDraw.Draw(x_overlay)
 
         for name, data in quest_data.items():
             status = data.get('status', 'unclaimed')
@@ -123,32 +137,52 @@ def generate_quest_image():
                 x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
                 box_coords, box_width, box_height = (x1, y1, x2, y2), x2 - x1, y2 - y1
                 
-                quest_box_area = img.crop(box_coords)
-                blurred_box = quest_box_area.filter(ImageFilter.GaussianBlur(radius=5))
+                # Blur and darken the background
+                blurred_box = img.crop(box_coords).filter(ImageFilter.GaussianBlur(radius=5))
                 img.paste(blurred_box, box_coords)
-
                 darken_layer = Image.new('RGBA', (box_width, box_height), (0, 0, 0, 96))
                 img.paste(darken_layer, box_coords, darken_layer)
                 
+                # --- NEW: Logic to add the user's name ---
+                claimer_name = data.get('claimer_name')
+                text_to_draw = f"by {claimer_name}" if claimer_name else ""
+                
+                # Calculate size of the text to be drawn
+                text_bbox = text_draw.textbbox((0,0), text_to_draw, font=font)
+                text_width = text_bbox[2] - text_bbox[0]
+                text_height = text_bbox[3] - text_bbox[1]
+
+                # Position the main overlay image
+                overlay_paste_x = x1 + (box_width - FIXED_OVERLAY_SIZE[0]) // 2
+                overlay_paste_y = y1 + (box_height - FIXED_OVERLAY_SIZE[1]) // 2 - (text_height // 2) # Nudge up to make space
+                overlay_paste_position = (overlay_paste_x, overlay_paste_y)
+
+                # Paste the main overlay
                 try:
                     overlay_img = Image.open(overlay_filename).convert("RGBA")
                     overlay_img = overlay_img.resize(FIXED_OVERLAY_SIZE, Image.Resampling.LANCZOS)
-                    paste_x = x1 + (box_width - FIXED_OVERLAY_SIZE[0]) // 2
-                    paste_y = y1 + (box_height - FIXED_OVERLAY_SIZE[1]) // 2
-                    img.paste(overlay_img, (paste_x, paste_y), overlay_img)
+                    img.paste(overlay_img, overlay_paste_position, overlay_img)
                 except FileNotFoundError:
-                    print(f"ERROR: '{overlay_filename}' not found. Check if the file is in the GitHub repository.")
-            
+                    print(f"ERROR: '{overlay_filename}' not found.")
+                
+                # Position and draw the "by User" text underneath the overlay
+                if claimer_name:
+                    text_x = x1 + (box_width - text_width) // 2
+                    text_y = overlay_paste_y + FIXED_OVERLAY_SIZE[1] - 50 # Position relative to overlay
+                    text_draw.text((text_x, text_y), text_to_draw, font=font, fill=(255, 255, 255, 200))
+
             elif status == 'completed_legacy':
                 x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
-                draw.line([(x1+30, y1+30), (x2-30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
-                draw.line([(x2-30, y1+30), (x1+30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
+                draw_x.line([(x1+30, y1+30), (x2-30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
+                draw_x.line([(x2-30, y1+30), (x1+30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
 
         img = Image.alpha_composite(img, x_overlay)
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
         buffer.seek(0)
         return buffer
+
+# --- All bot events and commands below this line are unchanged ---
 
 @bot.event
 async def on_ready():
