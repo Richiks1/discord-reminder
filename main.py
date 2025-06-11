@@ -110,19 +110,24 @@ def generate_quest_image():
             if not coords: continue
 
             color = None
-            # FIX: Adjust margin to make the completed 'X' larger
-            margin = 15 # Default margin for smaller pending 'X'
             
+            # FIX: New logic for width and margin to get the 'X' to fit perfectly.
+            width = 20  # Default width for pending
+            margin = 30 # Default margin for pending to make it appear smaller
+
             if status == 'pending': 
                 color = PENDING_COLOR
             elif status == 'completed': 
                 color = COMPLETED_COLOR
-                margin = 2 # Smaller margin for larger completed 'X'
+                # New values for a very thick, corner-to-corner 'X'
+                width = 40
+                margin = 20 # This should be half of the width to align the edges with the box
 
             if color:
                 x1, y1, x2, y2 = coords
-                draw.line([(x1 + margin, y1 + margin), (x2 - margin, y2 - margin)], fill=color, width=15)
-                draw.line([(x2 - margin, y1 + margin), (x1 + margin, y2 - margin)], fill=color, width=15)
+                # The line starts/ends are adjusted by the margin
+                draw.line([(x1 + margin, y1 + margin), (x2 - margin, y2 - margin)], fill=color, width=width)
+                draw.line([(x2 - margin, y1 + margin), (x1 + margin, y2 - margin)], fill=color, width=width)
         
         # Composite the overlay with the 'X's onto the base image
         img = Image.alpha_composite(img, overlay)
