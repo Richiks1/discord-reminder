@@ -24,7 +24,7 @@ intents.guilds = True
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# --- Path Configuration for Render's Persistent Storage ---
+# --- Path Configuration ---
 if os.getenv('RENDER'):
     DATA_DIR = '/data'
 else:
@@ -73,11 +73,33 @@ def serve_questboard_image():
         
     return send_file(image_buffer, mimetype='image/png', as_attachment=False)
 
+# --- NEW: TEMPORARY DEBUG ROUTE ---
+@app.route('/debug')
+def debug_files():
+    """This page will help us see what the server sees."""
+    try:
+        current_directory = os.getcwd()
+        files_in_directory = os.listdir(current_directory)
+        
+        response_html = f"<h1>File System Debug</h1>"
+        response_html += f"<h2>Current Working Directory:</h2><p>{current_directory}</p>"
+        response_html += f"<h2>Files and Folders Found:</h2><ul>"
+        
+        for item in files_in_directory:
+            response_html += f"<li>{item}</li>"
+            
+        response_html += "</ul>"
+        return response_html
+        
+    except Exception as e:
+        return f"An error occurred during debugging: {e}"
+
 def run_flask():
   port = int(os.environ.get('PORT', 8080))
   app.run(host='0.0.0.0', port=port)
 
 # --- Bot Logic ---
+# ... (The rest of your code is unchanged) ...
 def get_quest_data():
     if not os.path.exists(QUEST_DATA_FILE):
         if not os.path.exists(DATA_DIR):
@@ -103,79 +125,58 @@ def save_quest_data(data):
 def generate_quest_image():
     quest_data = get_quest_data()
     if quest_data is None: return None
-    if not os.path.exists(BASE_IMAGE_FILE): return None
+    if not os.path.exists(BASE_IMAGE_FILE): 
+        print(f"Error: Base image '{BASE_IMAGE_FILE}' not found in current directory.")
+        return None
     
     with Image.open(BASE_IMAGE_FILE) as base_img:
         img = base_img.copy().convert("RGBA")
-        
-        # Create a separate draw object for writing text onto the main image
         text_draw = ImageDraw.Draw(img)
-        
-        # Load the font for writing the user's name
         try:
             font = ImageFont.truetype("arial.ttf", 20)
         except IOError:
             print("WARNING: arial.ttf not found. Using default font.")
             font = ImageFont.load_default()
-
-        # Create a layer for legacy X marks
         x_overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
         draw_x = ImageDraw.Draw(x_overlay)
-
         for name, data in quest_data.items():
             status = data.get('status', 'unclaimed')
             coords = QUEST_COORDINATES.get(name)
             if not coords: continue
-
             overlay_filename = None
             if status == 'pending':
                 overlay_filename = 'requested_overlay.png'
             elif status == 'completed':
                 overlay_filename = 'completed_overlay.png'
-
             if overlay_filename:
                 x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
                 box_coords, box_width, box_height = (x1, y1, x2, y2), x2 - x1, y2 - y1
-                
-                # Blur and darken the background
                 blurred_box = img.crop(box_coords).filter(ImageFilter.GaussianBlur(radius=5))
                 img.paste(blurred_box, box_coords)
                 darken_layer = Image.new('RGBA', (box_width, box_height), (0, 0, 0, 96))
                 img.paste(darken_layer, box_coords, darken_layer)
-                
-                # --- NEW: Logic to add the user's name ---
                 claimer_name = data.get('claimer_name')
                 text_to_draw = f"by {claimer_name}" if claimer_name else ""
-                
-                # Calculate size of the text to be drawn
                 text_bbox = text_draw.textbbox((0,0), text_to_draw, font=font)
                 text_width = text_bbox[2] - text_bbox[0]
                 text_height = text_bbox[3] - text_bbox[1]
-
-                # Position the main overlay image
                 overlay_paste_x = x1 + (box_width - FIXED_OVERLAY_SIZE[0]) // 2
-                overlay_paste_y = y1 + (box_height - FIXED_OVERLAY_SIZE[1]) // 2 - (text_height // 2) # Nudge up to make space
+                overlay_paste_y = y1 + (box_height - FIXED_OVERLAY_SIZE[1]) // 2 - (text_height // 2)
                 overlay_paste_position = (overlay_paste_x, overlay_paste_y)
-
-                # Paste the main overlay
                 try:
                     overlay_img = Image.open(overlay_filename).convert("RGBA")
                     overlay_img = overlay_img.resize(FIXED_OVERLAY_SIZE, Image.Resampling.LANCZOS)
                     img.paste(overlay_img, overlay_paste_position, overlay_img)
                 except FileNotFoundError:
                     print(f"ERROR: '{overlay_filename}' not found.")
-                
-                # Position and draw the "by User" text underneath the overlay
                 if claimer_name:
                     text_x = x1 + (box_width - text_width) // 2
-                    text_y = overlay_paste_y + FIXED_OVERLAY_SIZE[1] - 50 # Position relative to overlay
+                    text_y = overlay_paste_y + FIXED_OVERLAY_SIZE[1] - 50
                     text_draw.text((text_x, text_y), text_to_draw, font=font, fill=(255, 255, 255, 200))
-
             elif status == 'completed_legacy':
                 x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
                 draw_x.line([(x1+30, y1+30), (x2-30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
                 draw_x.line([(x2-30, y1+30), (x1+30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
-
         img = Image.alpha_composite(img, x_overlay)
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
@@ -183,10 +184,8 @@ def generate_quest_image():
         return buffer
 
 # --- All bot events and commands below this line are unchanged ---
-
 @bot.event
 async def on_ready():
-    """Event that runs when the bot is connected and ready."""
     print(f'Logged in as {bot.user.name}')
     print('Bot is ready to accept commands.')
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
@@ -207,7 +206,6 @@ async def on_ready():
 
 @bot.command(name='list')
 async def list_quests(ctx):
-    """Displays the current quest board."""
     buffer = generate_quest_image()
     if buffer is None:
         await ctx.send(f"Sorry, the quest board image (`{BASE_IMAGE_FILE}`) is missing.")
@@ -216,7 +214,6 @@ async def list_quests(ctx):
 
 @bot.command(name='claim')
 async def claim_quest(ctx, quest_name: str, proof_link: str = None):
-    """Claims a quest, marking it as 'pending'. Attach proof or provide a link."""
     quest_name = quest_name.lower()
     quest_data = get_quest_data()
     if quest_name not in quest_data:
@@ -237,9 +234,7 @@ async def claim_quest(ctx, quest_name: str, proof_link: str = None):
     buffer = generate_quest_image()
     await ctx.send(f"⏳ {ctx.author.mention} has claimed **{quest_name}**! Your claim is now under review.", file=discord.File(buffer, 'current_quests.png'))
     admin_channel = bot.get_channel(ADMIN_CHANNEL_ID)
-    if not admin_channel:
-        print(f"Error: Could not find admin channel with ID {ADMIN_CHANNEL_ID}")
-        return
+    if not admin_channel: return
     embed = discord.Embed(title="⏳ New Pending Quest Claim!", color=discord.Color.orange())
     embed.add_field(name="Claimer", value=ctx.author.mention, inline=False)
     embed.add_field(name="Quest", value=quest_name, inline=False)
@@ -266,7 +261,6 @@ async def claim_quest(ctx, quest_name: str, proof_link: str = None):
 @bot.command(name='resetquests', hidden=True)
 @commands.has_permissions(administrator=True)
 async def reset_quests(ctx):
-    """(Admin Only) Resets all quests to 'unclaimed'."""
     default_data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
     save_quest_data(default_data)
     await ctx.send("✅ All quests have been reset.")
@@ -275,13 +269,10 @@ async def reset_quests(ctx):
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    """Handles admin reactions for approving/denying claims."""
     if payload.user_id == bot.user.id or payload.channel_id != ADMIN_CHANNEL_ID: return
     channel = bot.get_channel(payload.channel_id)
-    try:
-        message = await channel.fetch_message(payload.message_id)
-    except discord.NotFound:
-        return
+    try: message = await channel.fetch_message(payload.message_id)
+    except discord.NotFound: return
     if not message.embeds or message.author.id != bot.user.id or "Pending" not in message.embeds[0].title: return
     reactor = payload.member
     if not reactor or not reactor.guild_permissions.manage_guild: return
@@ -292,7 +283,6 @@ async def on_raw_reaction_add(payload):
     quest_data = get_quest_data()
     if not quest_name or quest_name not in quest_data: return
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
-
     if str(payload.emoji) == "✅":
         quest_data[quest_name]['status'] = 'completed'
         save_quest_data(quest_data)
@@ -304,7 +294,6 @@ async def on_raw_reaction_add(payload):
         new_embed.add_field(name="Moderator", value=reactor.mention)
         await message.edit(embed=new_embed); await message.clear_reactions()
         print(f"INFO: Claim for '{quest_name}' was APPROVED by {reactor.display_name}.")
-    
     elif str(payload.emoji) == "❌":
         quest_data[quest_name]['status'] = 'unclaimed'
         quest_data[quest_name]['claimer_id'] = None
@@ -321,19 +310,14 @@ async def on_raw_reaction_add(payload):
 
 @claim_quest.error
 async def claim_error(ctx, error):
-    """Error handler for the claim command."""
     if isinstance(error, commands.MissingRequiredArgument):
         await ctx.send("Usage: `!claim <quest_name> [replay_link_or_attachment]`")
 
-# --- Main Execution ---
 def run_bot():
     if TOKEN:
-        try:
-            bot.run(TOKEN)
-        except discord.errors.LoginFailure:
-            print("FATAL ERROR: Invalid Discord token provided in Render Environment Variables.")
-        except Exception as e:
-            print(f"An unexpected error occurred while running the bot: {e}")
+        try: bot.run(TOKEN)
+        except discord.errors.LoginFailure: print("FATAL ERROR: Invalid Discord token provided in Render Environment Variables.")
+        except Exception as e: print(f"An unexpected error occurred while running the bot: {e}")
     else:
         print("FATAL ERROR: DISCORD_TOKEN not found in environment variables. Please set it in your Render dashboard.")
 
