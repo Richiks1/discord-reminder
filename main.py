@@ -1,7 +1,7 @@
 # main.py
 import discord
 from discord.ext import commands
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import json
 import os
 import io
@@ -36,23 +36,21 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 # --- Quest Data and Image Coordinates ---
 QUEST_COORDINATES = {
-    "sweet1": (35, 200, 350, 425),
-    "wanted": (360, 200, 675, 425),
-    "bigbass": (685, 200, 1000, 425),
-    "vampy": (35, 440, 350, 665),
-    "mines": (360, 440, 675, 665),
-    "towers": (685, 440, 1000, 665),
-    "sweet2": (35, 675, 350, 900),
-    "sweet3": (360, 675, 675, 900),
-    "sweet4": (685, 675, 1000, 900),
+    "sweet1": (38, 195, 386, 420),
+    "wanted":   (411, 195, 759, 420),
+    "bigbass":  (784, 195, 1132, 420),
+    "vampy":    (38, 435, 386, 660),
+    "mines":    (411, 435, 759, 660),
+    "towers":   (784, 435, 1132, 660),
+    "sweet2":   (38, 675, 386, 900),
+    "sweet3":   (411, 675, 759, 900),
+    "sweet4":   (784, 675, 1132, 900),
 }
 QUEST_DATA_FILE = 'quests.json'
 BASE_IMAGE_FILE = 'questboard.png'
 
-# --- THIS IS THE FIX ---
-# Quest Statuses: 'unclaimed', 'pending', 'completed'
-PENDING_COLOR = (255, 165, 0, 200)      # Orange, semi-transparent
-COMPLETED_COLOR = (0, 255, 0, 255)     # Bright Green, solid (as per the new image)
+# Quest Statuses Color
+LEGACY_COMPLETED_COLOR = (255, 0, 0, 255) # Red, for old completions
 
 # --- Flask Web Server Setup ---
 app = Flask('')
@@ -96,41 +94,65 @@ def generate_quest_image():
         print(f"Error: Base image '{BASE_IMAGE_FILE}' not found.")
         return None
 
-    with Image.open(BASE_IMAGE_FILE) as img:
-        img = img.convert("RGBA")
-        overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
-        draw = ImageDraw.Draw(overlay)
+    with Image.open(BASE_IMAGE_FILE) as base_img:
+        img = base_img.copy().convert("RGBA")
+        
+        # Create a separate layer for legacy X marks to avoid them getting blurred
+        x_overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
+        draw = ImageDraw.Draw(x_overlay)
 
         for name, data in quest_data.items():
             status = data.get('status', 'unclaimed')
             coords = QUEST_COORDINATES.get(name)
             if not coords: continue
 
-            color = None
+            overlay_filename = None
+            # Determine which overlay file to use based on the status
+            if status == 'pending':
+                overlay_filename = 'requested_overlay.png'
+            elif status == 'completed':
+                overlay_filename = 'completed_overlay.png'
+
+            # If the status is one that uses a blur and overlay effect...
+            if overlay_filename:
+                box_to_process = (coords[0], coords[1], coords[2], coords[3])
+                quest_box_area = img.crop(box_to_process)
+                blurred_box = quest_box_area.filter(ImageFilter.GaussianBlur(radius=5))
+                img.paste(blurred_box, box_to_process)
+                
+                try:
+                    overlay_img = Image.open(overlay_filename).convert("RGBA")
+                    
+                    box_width = coords[2] - coords[0]
+                    target_overlay_width = int(box_width * 0.8)
+                    w_percent = (target_overlay_width / float(overlay_img.size[0]))
+                    h_size = int((float(overlay_img.size[1]) * float(w_percent)))
+                    overlay_img = overlay_img.resize((target_overlay_width, h_size), Image.Resampling.LANCZOS)
+                    
+                    paste_x = coords[0] + (box_width - target_overlay_width) // 2
+                    paste_y = coords[1] + (coords[3] - coords[1] - h_size) // 2
+                    paste_position = (paste_x, paste_y)
+                    
+                    img.paste(overlay_img, paste_position, overlay_img)
+
+                except FileNotFoundError:
+                    print(f"ERROR: '{overlay_filename}' not found. Drawing a fallback rectangle.")
+                    fallback_draw = ImageDraw.Draw(img)
+                    fallback_draw.rectangle(box_to_process, outline="red", width=5)
             
-            # Default values, used for 'pending' status
-            width = 15
-            margin = 40
+            # Handle the old 'completed_legacy' status by drawing a red X
+            elif status == 'completed_legacy':
+                draw.line([(coords[0]+30, coords[1]+30), (coords[2]-30, coords[3]-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
+                draw.line([(coords[2]-30, coords[1]+30), (coords[0]+30, coords[3]-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
 
-            if status == 'pending': 
-                color = PENDING_COLOR
-            elif status == 'completed': 
-                color = COMPLETED_COLOR
-                # --- THIS IS THE FIX ---
-                # New values to match the thick, green marker style from the example image.
-                width = 40  # Very thick line
-                margin = 20 # Small margin to make the X large
+        # After processing all boxes, composite the legacy X marks on top
+        img = Image.alpha_composite(img, x_overlay)
 
-            if color:
-                x1, y1, x2, y2 = coords
-                draw.line([(x1 + margin, y1 + margin), (x2 - margin, y2 - margin)], fill=color, width=width)
-                draw.line([(x2 - margin, y1 + margin), (x1 + margin, y2 - margin)], fill=color, width=width)
-        
-        img = Image.alpha_composite(img, overlay)
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
         buffer.seek(0)
         return buffer
+
 
 @bot.event
 async def on_ready():
