@@ -107,17 +107,20 @@ def generate_quest_image():
 
             color = None
             
-            # FIX: Adjusted width and margin values to properly fit the 'X' inside the box.
-            width = 15  # Default width for pending
-            margin = 40 # Default margin for pending to make it appear smaller
+            # Default values, used for 'pending' status
+            width = 15
+            margin = 40
 
             if status == 'pending': 
                 color = PENDING_COLOR
             elif status == 'completed': 
                 color = COMPLETED_COLOR
-                # New values for a thick, but contained 'X'
-                width = 30
-                margin = 25 # Increased margin to pull the larger 'X' inwards
+                # --- THIS IS THE FIX ---
+                # Adjusted values for a smaller 'X' that fits inside the box.
+                # Increased margin pulls the X's endpoints inward.
+                # A slightly thinner width also helps prevent overlap.
+                width = 25
+                margin = 45 
 
             if color:
                 x1, y1, x2, y2 = coords
@@ -136,13 +139,12 @@ async def on_ready():
     print(f'Logged in as {bot.user.name}')
     print('Bot is ready to accept commands.')
     if not os.path.exists(BASE_IMAGE_FILE):
-         print(f"Error: Base image '{BASE_IMAGE_FILE}' not found. Please place it in the same directory.")
-         return
+        print(f"Error: Base image '{BASE_IMAGE_FILE}' not found. Please place it in the same directory.")
+        return
 
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
     if announcement_channel:
         try:
-            # FIX: Reduced sleep time to 5 seconds as requested.
             print("Waiting 5 seconds before posting initial quest board...")
             await asyncio.sleep(5)
             
@@ -199,7 +201,6 @@ async def claim_quest(ctx, quest_name: str):
     quest_info['claimer_name'] = ctx.author.display_name
     save_quest_data(quest_data)
 
-    # FIX: Combined two messages into one to prevent double sending.
     buffer = generate_quest_image()
     await ctx.send(
         f"⏳ {ctx.author.mention} has claimed **{quest_name}**! Your claim is now under review.",
