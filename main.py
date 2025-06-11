@@ -31,6 +31,8 @@ intents.messages = True
 intents.message_content = True
 intents.reactions = True
 intents.guilds = True
+# FIX: Added Members Intent to allow the bot to find users by ID for tagging.
+intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # --- Quest Data and Image Coordinates ---
@@ -108,19 +110,24 @@ def generate_quest_image():
             if not coords: continue
 
             color = None
-            if status == 'pending': color = PENDING_COLOR
-            elif status == 'completed': color = COMPLETED_COLOR
+            # FIX: Adjust margin to make the completed 'X' larger
+            margin = 15 # Default margin for smaller pending 'X'
+            
+            if status == 'pending': 
+                color = PENDING_COLOR
+            elif status == 'completed': 
+                color = COMPLETED_COLOR
+                margin = 2 # Smaller margin for larger completed 'X'
 
             if color:
                 x1, y1, x2, y2 = coords
-                draw.line([(x1 + 10, y1 + 10), (x2 - 10, y2 - 10)], fill=color, width=15)
-                draw.line([(x2 - 10, y1 + 10), (x1 + 10, y2 - 10)], fill=color, width=15)
+                draw.line([(x1 + margin, y1 + margin), (x2 - margin, y2 - margin)], fill=color, width=15)
+                draw.line([(x2 - margin, y1 + margin), (x1 + margin, y2 - margin)], fill=color, width=15)
         
         # Composite the overlay with the 'X's onto the base image
         img = Image.alpha_composite(img, overlay)
 
         buffer = io.BytesIO()
-        # FIX: Save as RGBA PNG to preserve the transparency of the 'X'
         img.save(buffer, format='PNG')
         buffer.seek(0)
         return buffer
@@ -134,7 +141,6 @@ async def on_ready():
          print(f"Error: Base image '{BASE_IMAGE_FILE}' not found. Please place it in the same directory.")
          return
 
-    # Post the initial quest board when the bot starts
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
     if announcement_channel:
         try:
@@ -228,13 +234,10 @@ async def reset_quests(ctx):
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    # Ignore reactions from the bot itself
     if payload.user_id == bot.user.id: return
     
-    # DEBUG: Log all reactions the bot sees
     print(f"DEBUG: Reaction '{payload.emoji}' by {payload.member.display_name if payload.member else payload.user_id} in channel {payload.channel_id}")
 
-    # Only handle reactions in the admin channel
     if payload.channel_id != ADMIN_CHANNEL_ID: return
 
     print("DEBUG: Reaction is in the correct admin channel.")
@@ -246,20 +249,17 @@ async def on_raw_reaction_add(payload):
         print("DEBUG: Reaction was on a message not found in cache.")
         return
 
-    # Make sure the message is a claim embed from our bot
     if not message.embeds or message.author.id != bot.user.id or not ( "Pending" in message.embeds[0].title ):
         print("DEBUG: Reaction was on a message that is not a pending claim. Ignoring.")
         return
 
     print("DEBUG: Reaction is on a valid pending claim message.")
 
-    # FIX: Use payload.member, which is more reliable.
     reactor = payload.member 
     if not reactor:
         print(f"DEBUG: Could not identify the member who reacted.")
         return
 
-    # FIX: Check for 'Manage Server' permission instead of full 'Administrator'
     if not reactor.guild_permissions.manage_guild:
         print(f"DEBUG: User {reactor.display_name} lacks 'Manage Server' permission to approve/deny.")
         return
@@ -269,7 +269,12 @@ async def on_raw_reaction_add(payload):
     embed = message.embeds[0]
     quest_name = next((field.value for field in embed.fields if field.name == "Quest"), None)
     claimer_id = int(embed.footer.text.replace("Claimer ID: ", ""))
-    claimer = payload.member.guild.get_member(claimer_id)
+    # FIX: Fetch the guild to reliably get the member object for tagging
+    guild = bot.get_guild(payload.guild_id)
+    claimer = None
+    if guild:
+        claimer = guild.get_member(claimer_id)
+
     quest_data = get_quest_data()
 
     if not quest_name or quest_name not in quest_data: return
