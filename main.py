@@ -6,21 +6,12 @@ import json
 import os
 import io
 import asyncio
-from flask import Flask
+from flask import Flask, send_file
 from threading import Thread
 
 # --- Configuration ---
-# IMPORTANT: Create a file named .env in the same directory as this script
-# and add your bot token like this:
-# DISCORD_TOKEN=YourActualBotTokenGoesHere
-
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-    TOKEN = os.getenv('DISCORD_TOKEN')
-except ImportError:
-    print("dotenv library not found. Please install it with 'pip install python-dotenv'")
-    TOKEN = None # Set your token here directly if you don't use a .env file
+# This script will get the token from Render's Environment Variables
+TOKEN = os.getenv('DISCORD_TOKEN')
 
 ADMIN_CHANNEL_ID = 1219283442315952148
 ANNOUNCEMENT_CHANNEL_ID = 815577373583736845
@@ -34,6 +25,16 @@ intents.guilds = True
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# --- Path Configuration for Render's Persistent Storage ---
+# This ensures your quests.json file is NOT deleted on restarts
+if os.getenv('RENDER'):
+    DATA_DIR = '/data'
+else:
+    DATA_DIR = '.' # Use current directory for local testing
+
+QUEST_DATA_FILE = os.path.join(DATA_DIR, 'quests.json')
+BASE_IMAGE_FILE = 'questboard.png'
+
 # --- Quest Data and Image Coordinates ---
 QUEST_COORDINATES = {
     "sweet1": (42, 174, 453, 368),
@@ -46,8 +47,6 @@ QUEST_COORDINATES = {
     "sweet3":   (473, 603, 886, 796),
     "sweet4":   (909, 603, 1317, 798),
 }
-QUEST_DATA_FILE = 'quests.json'
-BASE_IMAGE_FILE = 'questboard.png'
 
 # --- Define the fixed size for your overlay images ---
 FIXED_OVERLAY_SIZE = (400, 200) # Width: 400, Height: 200
@@ -62,14 +61,24 @@ app = Flask('')
 def home():
     return "Bot is alive and running!"
 
+@app.route('/questboard.png')
+def serve_questboard_image():
+    """This function runs to serve the live quest board image to your website."""
+    image_buffer = generate_quest_image()
+    if image_buffer is None:
+        return "Error generating quest board image.", 500
+    return send_file(image_buffer, mimetype='image/png', as_attachment=False)
+
 def run_flask():
-  app.run(host='0.0.0.0', port=8080)
+  port = int(os.environ.get('PORT', 8080))
+  app.run(host='0.0.0.0', port=port)
 
 # --- Bot Logic ---
-
 def get_quest_data():
-    """Loads quest completion status from the JSON file."""
+    """Loads quest data. Creates the file and directory if they don't exist."""
     if not os.path.exists(QUEST_DATA_FILE):
+        if not os.path.exists(DATA_DIR):
+            os.makedirs(DATA_DIR)
         data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
         with open(QUEST_DATA_FILE, 'w') as f:
             json.dump(data, f, indent=4)
@@ -83,23 +92,20 @@ def get_quest_data():
             json.dump(data, f, indent=4)
         return data
 
-
 def save_quest_data(data):
-    """Saves quest completion status to the JSON file."""
+    """Saves quest data to the JSON file."""
     with open(QUEST_DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
 def generate_quest_image():
-    """Generates the quest board image with markers for pending/completed quests."""
+    """Generates the main quest board image by applying overlays and markers."""
     quest_data = get_quest_data()
-    
     if not os.path.exists(BASE_IMAGE_FILE):
-        print(f"Error: Base image '{BASE_IMAGE_FILE}' not found.")
+        print(f"ERROR: Base image '{BASE_IMAGE_FILE}' not found.")
         return None
-
+    
     with Image.open(BASE_IMAGE_FILE) as base_img:
         img = base_img.copy().convert("RGBA")
-        
         x_overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(x_overlay)
 
@@ -116,10 +122,7 @@ def generate_quest_image():
 
             if overlay_filename:
                 x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
-                
-                box_coords = (x1, y1, x2, y2)
-                box_width = x2 - x1
-                box_height = y2 - y1
+                box_coords, box_width, box_height = (x1, y1, x2, y2), x2 - x1, y2 - y1
                 
                 quest_box_area = img.crop(box_coords)
                 blurred_box = quest_box_area.filter(ImageFilter.GaussianBlur(radius=5))
@@ -131,17 +134,11 @@ def generate_quest_image():
                 try:
                     overlay_img = Image.open(overlay_filename).convert("RGBA")
                     overlay_img = overlay_img.resize(FIXED_OVERLAY_SIZE, Image.Resampling.LANCZOS)
-                    
                     paste_x = x1 + (box_width - FIXED_OVERLAY_SIZE[0]) // 2
                     paste_y = y1 + (box_height - FIXED_OVERLAY_SIZE[1]) // 2
-                    paste_position = (paste_x, paste_y)
-                    
-                    img.paste(overlay_img, paste_position, overlay_img)
-
+                    img.paste(overlay_img, (paste_x, paste_y), overlay_img)
                 except FileNotFoundError:
-                    print(f"ERROR: '{overlay_filename}' not found. Drawing a fallback rectangle.")
-                    fallback_draw = ImageDraw.Draw(img)
-                    fallback_draw.rectangle(box_coords, outline="red", width=5)
+                    print(f"ERROR: '{overlay_filename}' not found. Check if the file is in the project folder.")
             
             elif status == 'completed_legacy':
                 x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
@@ -149,43 +146,31 @@ def generate_quest_image():
                 draw.line([(x2-30, y1+30), (x1+30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
 
         img = Image.alpha_composite(img, x_overlay)
-
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
         buffer.seek(0)
         return buffer
-
 
 @bot.event
 async def on_ready():
     """Event that runs when the bot is connected and ready."""
     print(f'Logged in as {bot.user.name}')
     print('Bot is ready to accept commands.')
-    if not os.path.exists(BASE_IMAGE_FILE):
-        print(f"Error: Base image '{BASE_IMAGE_FILE}' not found. Please place it in the same directory.")
-        return
-
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
     if announcement_channel:
         try:
             print("Waiting 5 seconds before posting initial quest board...")
             await asyncio.sleep(5)
-            
             print(f"Sending initial quest board to channel: {announcement_channel.name}")
             buffer = generate_quest_image()
             if buffer:
                 await announcement_channel.send("The weekly quest board is here! Use `!list` to see the latest version at any time.", file=discord.File(buffer, 'current_quests.png'))
             else:
                 print("Failed to generate quest image on startup.")
-        except discord.Forbidden:
-            print(f"Error: Bot does not have permission to send messages in the announcement channel (ID: {ANNOUNCEMENT_CHANNEL_ID}).")
         except Exception as e:
             print(f"An error occurred when trying to post initial quest board: {e}")
     else:
         print(f"Error: Could not find announcement channel with ID {ANNOUNCEMENT_CHANNEL_ID} on startup.")
-
-
-# --- Bot Commands ---
 
 @bot.command(name='list')
 async def list_quests(ctx):
@@ -196,76 +181,54 @@ async def list_quests(ctx):
         return
     await ctx.send(file=discord.File(buffer, 'current_quests.png'))
 
-# --- THIS IS THE UPDATED COMMAND ---
 @bot.command(name='claim')
 async def claim_quest(ctx, quest_name: str, proof_link: str = None):
-    """
-    Claims a quest, marking it as 'pending'. Attach proof or provide a link.
-    Usage: !claim <quest_name> [replay_link]
-    """
+    """Claims a quest, marking it as 'pending'. Attach proof or provide a link."""
     quest_name = quest_name.lower()
     quest_data = get_quest_data()
-
     if quest_name not in quest_data:
         await ctx.send(f"'{quest_name}' is not a valid quest name. Please check `!list` and try again.")
         return
-
-    # Check for proof: either an attachment OR a link must be present
     if not ctx.message.attachments and proof_link is None:
         await ctx.send("You must attach proof (an image or video) or provide a replay link!")
         return
-    
     quest_info = quest_data[quest_name]
     if quest_info['status'] != 'unclaimed':
         claimer_name = quest_info.get("claimer_name", "Someone")
         await ctx.send(f"Sorry, quest '{quest_name}' is already '{quest_info['status']}' by {claimer_name}.")
         return
-
     quest_info['status'] = 'pending'
     quest_info['claimer_id'] = ctx.author.id
     quest_info['claimer_name'] = ctx.author.display_name
     save_quest_data(quest_data)
-
     buffer = generate_quest_image()
-    await ctx.send(
-        f"⏳ {ctx.author.mention} has claimed **{quest_name}**! Your claim is now under review.",
-        file=discord.File(buffer, 'current_quests.png')
-    )
-    
+    await ctx.send(f"⏳ {ctx.author.mention} has claimed **{quest_name}**! Your claim is now under review.", file=discord.File(buffer, 'current_quests.png'))
     admin_channel = bot.get_channel(ADMIN_CHANNEL_ID)
     if not admin_channel:
         print(f"Error: Could not find admin channel with ID {ADMIN_CHANNEL_ID}")
         return
-
     embed = discord.Embed(title="⏳ New Pending Quest Claim!", color=discord.Color.orange())
     embed.add_field(name="Claimer", value=ctx.author.mention, inline=False)
     embed.add_field(name="Quest", value=quest_name, inline=False)
     embed.add_field(name="Original Message", value=f"[Jump to Message]({ctx.message.jump_url})", inline=False)
-    
-    # Add proof to the embed, preferring attachments
     if ctx.message.attachments:
         attachment = ctx.message.attachments[0]
-        # If the attachment is an image, display it. Otherwise, link to it.
         if attachment.content_type and attachment.content_type.startswith('image/'):
             embed.set_image(url=attachment.url)
         else:
             embed.add_field(name="Proof Attachment", value=f"[{attachment.filename}]({attachment.url})", inline=False)
     elif proof_link:
         embed.add_field(name="Proof Link", value=proof_link, inline=False)
-        # Try to set image if the link is a direct image link
         image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
         if any(ext in proof_link.lower() for ext in image_extensions):
             embed.set_image(url=proof_link)
-
     embed.set_footer(text=f"Claimer ID: {ctx.author.id}")
-
     try:
         msg = await admin_channel.send(embed=embed)
         await msg.add_reaction("✅")
         await msg.add_reaction("❌")
     except discord.Forbidden:
         print(f"Error: Missing permissions in admin channel {ADMIN_CHANNEL_ID}")
-
 
 @bot.command(name='resetquests', hidden=True)
 @commands.has_permissions(administrator=True)
@@ -277,97 +240,70 @@ async def reset_quests(ctx):
     buffer = generate_quest_image()
     await ctx.send("The quest board is now clean:", file=discord.File(buffer, 'current_quests.png'))
 
-# --- Event Handling for Reactions ---
-
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.user_id == bot.user.id: return
-    
-    if payload.channel_id != ADMIN_CHANNEL_ID: return
-    
+    """Handles admin reactions for approving/denying claims."""
+    if payload.user_id == bot.user.id or payload.channel_id != ADMIN_CHANNEL_ID: return
     channel = bot.get_channel(payload.channel_id)
-    try: 
+    try:
         message = await channel.fetch_message(payload.message_id)
-    except discord.NotFound: 
+    except discord.NotFound:
         return
-
-    if not message.embeds or message.author.id != bot.user.id or not ( "Pending" in message.embeds[0].title ):
-        return
-
-    reactor = payload.member 
-    if not reactor:
-        return
-
-    if not reactor.guild_permissions.manage_guild:
-        return
-    
+    if not message.embeds or message.author.id != bot.user.id or "Pending" not in message.embeds[0].title: return
+    reactor = payload.member
+    if not reactor or not reactor.guild_permissions.manage_guild: return
     embed = message.embeds[0]
     quest_name = next((field.value for field in embed.fields if field.name == "Quest"), None)
     claimer_id = int(embed.footer.text.replace("Claimer ID: ", ""))
-    guild = bot.get_guild(payload.guild_id)
-    claimer = None
-    if guild:
-        claimer = guild.get_member(claimer_id)
-
+    claimer = payload.member.guild.get_member(claimer_id)
     quest_data = get_quest_data()
-
     if not quest_name or quest_name not in quest_data: return
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
 
     if str(payload.emoji) == "✅":
         quest_data[quest_name]['status'] = 'completed'
         save_quest_data(quest_data)
-
         if announcement_channel:
             congrats_msg = f"🎉 Congratulations to {claimer.mention if claimer else f'User ID {claimer_id}'} for completing **{quest_name}**! Approved."
             new_image_buffer = generate_quest_image()
             await announcement_channel.send(congrats_msg, file=discord.File(new_image_buffer, 'current_quests.png'))
-        
         new_embed = embed.copy(); new_embed.title = "✅ Quest Claim Approved"; new_embed.color = discord.Color.green()
         new_embed.add_field(name="Moderator", value=reactor.mention)
         await message.edit(embed=new_embed); await message.clear_reactions()
         print(f"INFO: Claim for '{quest_name}' was APPROVED by {reactor.display_name}.")
-
-
+    
     elif str(payload.emoji) == "❌":
         quest_data[quest_name]['status'] = 'unclaimed'
         quest_data[quest_name]['claimer_id'] = None
         quest_data[quest_name]['claimer_name'] = None
         save_quest_data(quest_data)
-
-        if claimer: await claimer.send(f"Sorry, your claim for '{quest_name}' was denied. The quest is now available again.")
+        # No longer sends a DM, only posts in the announcement channel
         if announcement_channel:
             denial_msg = f"ℹ️ The claim for **{quest_name}** by {claimer.mention if claimer else f'User ID {claimer_id}'} was denied. The quest is now open!"
             new_image_buffer = generate_quest_image()
             await announcement_channel.send(denial_msg, file=discord.File(new_image_buffer, 'current_quests.png'))
-
         new_embed = embed.copy(); new_embed.title = "❌ Quest Claim Denied"; new_embed.color = discord.Color.red()
         new_embed.add_field(name="Moderator", value=reactor.mention)
         await message.edit(embed=new_embed); await message.clear_reactions()
         print(f"INFO: Claim for '{quest_name}' was DENIED by {reactor.display_name}.")
 
-# --- Error Handling & Run ---
 @claim_quest.error
 async def claim_error(ctx, error):
+    """Error handler for the claim command."""
     if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("Usage: `!claim <quest_name> [replay_link]`")
+        await ctx.send("Usage: `!claim <quest_name> [replay_link_or_attachment]`")
 
-def run_bot():
-    if TOKEN is None:
-        print("FATAL ERROR: Bot token not configured. Please set DISCORD_TOKEN in your .env file or as an environment variable.")
-        return
-    try:
-        bot.run(TOKEN)
-    except discord.errors.LoginFailure:
-        print("FATAL ERROR: Invalid Discord token.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-
+# --- Main Execution ---
 if __name__ == "__main__":
-    # Start the Flask server in a new thread
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
-
-    # Run the Discord bot in the main thread
-    run_bot()
+    if TOKEN:
+        try:
+            bot.run(TOKEN)
+        except discord.errors.LoginFailure:
+            print("FATAL ERROR: Invalid Discord token provided.")
+        except Exception as e:
+            print(f"An unexpected error occurred while running the bot: {e}")
+    else:
+        print("FATAL ERROR: DISCORD_TOKEN not found in environment variables. Please set it in your Render dashboard.")
