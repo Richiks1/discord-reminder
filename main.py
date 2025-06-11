@@ -50,7 +50,7 @@ QUEST_DATA_FILE = 'quests.json'
 BASE_IMAGE_FILE = 'questboard.png'
 
 # Quest Statuses: 'unclaimed', 'pending', 'completed'
-PENDING_COLOR = (255, 165, 0, 180)  # Orange, semi-transparent
+PENDING_COLOR = (255, 165, 0, 200)  # Orange, semi-transparent
 COMPLETED_COLOR = (255, 0, 0, 255) # Red, solid
 
 # --- Flask Web Server Setup ---
@@ -103,7 +103,7 @@ def generate_quest_image():
         draw = ImageDraw.Draw(overlay)
 
         for name, data in quest_data.items():
-            status = data['status']
+            status = data.get('status', 'unclaimed')
             coords = QUEST_COORDINATES.get(name)
             if not coords: continue
 
@@ -116,9 +116,12 @@ def generate_quest_image():
                 draw.line([(x1 + 10, y1 + 10), (x2 - 10, y2 - 10)], fill=color, width=15)
                 draw.line([(x2 - 10, y1 + 10), (x1 + 10, y2 - 10)], fill=color, width=15)
         
+        # Composite the overlay with the 'X's onto the base image
         img = Image.alpha_composite(img, overlay)
+
         buffer = io.BytesIO()
-        img.convert("RGB").save(buffer, format='PNG')
+        # FIX: Save as RGBA PNG to preserve the transparency of the 'X'
+        img.save(buffer, format='PNG')
         buffer.seek(0)
         return buffer
 
@@ -129,6 +132,25 @@ async def on_ready():
     print('Bot is ready to accept commands.')
     if not os.path.exists(BASE_IMAGE_FILE):
          print(f"Error: Base image '{BASE_IMAGE_FILE}' not found. Please place it in the same directory.")
+         return
+
+    # Post the initial quest board when the bot starts
+    announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
+    if announcement_channel:
+        try:
+            print(f"Sending initial quest board to channel: {announcement_channel.name}")
+            buffer = generate_quest_image()
+            if buffer:
+                await announcement_channel.send("The weekly quest board is here! Use `!list` to see the latest version at any time.", file=discord.File(buffer, 'current_quests.png'))
+            else:
+                print("Failed to generate quest image on startup.")
+        except discord.Forbidden:
+            print(f"Error: Bot does not have permission to send messages in the announcement channel (ID: {ANNOUNCEMENT_CHANNEL_ID}).")
+        except Exception as e:
+            print(f"An error occurred when trying to post initial quest board: {e}")
+    else:
+        print(f"Error: Could not find announcement channel with ID {ANNOUNCEMENT_CHANNEL_ID} on startup.")
+
 
 # --- Bot Commands ---
 
@@ -206,22 +228,48 @@ async def reset_quests(ctx):
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.user_id == bot.user.id or payload.channel_id != ADMIN_CHANNEL_ID: return
+    # Ignore reactions from the bot itself
+    if payload.user_id == bot.user.id: return
+    
+    # DEBUG: Log all reactions the bot sees
+    print(f"DEBUG: Reaction '{payload.emoji}' by {payload.member.display_name if payload.member else payload.user_id} in channel {payload.channel_id}")
 
+    # Only handle reactions in the admin channel
+    if payload.channel_id != ADMIN_CHANNEL_ID: return
+
+    print("DEBUG: Reaction is in the correct admin channel.")
+    
     channel = bot.get_channel(payload.channel_id)
-    try: message = await channel.fetch_message(payload.message_id)
-    except discord.NotFound: return
+    try: 
+        message = await channel.fetch_message(payload.message_id)
+    except discord.NotFound: 
+        print("DEBUG: Reaction was on a message not found in cache.")
+        return
 
-    if not message.embeds or message.author.id != bot.user.id or not ( "Pending" in message.embeds[0].title ): return
+    # Make sure the message is a claim embed from our bot
+    if not message.embeds or message.author.id != bot.user.id or not ( "Pending" in message.embeds[0].title ):
+        print("DEBUG: Reaction was on a message that is not a pending claim. Ignoring.")
+        return
 
-    guild = bot.get_guild(payload.guild_id)
-    reactor = guild.get_member(payload.user_id)
-    if not reactor or not reactor.guild_permissions.administrator: return
+    print("DEBUG: Reaction is on a valid pending claim message.")
+
+    # FIX: Use payload.member, which is more reliable.
+    reactor = payload.member 
+    if not reactor:
+        print(f"DEBUG: Could not identify the member who reacted.")
+        return
+
+    # FIX: Check for 'Manage Server' permission instead of full 'Administrator'
+    if not reactor.guild_permissions.manage_guild:
+        print(f"DEBUG: User {reactor.display_name} lacks 'Manage Server' permission to approve/deny.")
+        return
+    
+    print(f"DEBUG: User {reactor.display_name} has permissions. Processing action.")
 
     embed = message.embeds[0]
     quest_name = next((field.value for field in embed.fields if field.name == "Quest"), None)
     claimer_id = int(embed.footer.text.replace("Claimer ID: ", ""))
-    claimer = guild.get_member(claimer_id)
+    claimer = payload.member.guild.get_member(claimer_id)
     quest_data = get_quest_data()
 
     if not quest_name or quest_name not in quest_data: return
@@ -232,13 +280,15 @@ async def on_raw_reaction_add(payload):
         save_quest_data(quest_data)
 
         if announcement_channel:
-            congrats_msg = f"🎉 Congratulations to {claimer.mention} for completing **{quest_name}**! Approved."
+            congrats_msg = f"🎉 Congratulations to {claimer.mention if claimer else f'User ID {claimer_id}'} for completing **{quest_name}**! Approved."
             new_image_buffer = generate_quest_image()
             await announcement_channel.send(congrats_msg, file=discord.File(new_image_buffer, 'current_quests.png'))
         
         new_embed = embed.copy(); new_embed.title = "✅ Quest Claim Approved"; new_embed.color = discord.Color.green()
         new_embed.add_field(name="Moderator", value=reactor.mention)
         await message.edit(embed=new_embed); await message.clear_reactions()
+        print(f"INFO: Claim for '{quest_name}' was APPROVED by {reactor.display_name}.")
+
 
     elif str(payload.emoji) == "❌":
         quest_data[quest_name]['status'] = 'unclaimed'
@@ -248,13 +298,14 @@ async def on_raw_reaction_add(payload):
 
         if claimer: await claimer.send(f"Sorry, your claim for '{quest_name}' was denied. The quest is now available again.")
         if announcement_channel:
-            denial_msg = f"ℹ️ The claim for **{quest_name}** by {claimer.mention} was denied. The quest is now open!"
+            denial_msg = f"ℹ️ The claim for **{quest_name}** by {claimer.mention if claimer else f'User ID {claimer_id}'} was denied. The quest is now open!"
             new_image_buffer = generate_quest_image()
             await announcement_channel.send(denial_msg, file=discord.File(new_image_buffer, 'current_quests.png'))
 
         new_embed = embed.copy(); new_embed.title = "❌ Quest Claim Denied"; new_embed.color = discord.Color.red()
         new_embed.add_field(name="Moderator", value=reactor.mention)
         await message.edit(embed=new_embed); await message.clear_reactions()
+        print(f"INFO: Claim for '{quest_name}' was DENIED by {reactor.display_name}.")
 
 # --- Error Handling & Run ---
 @claim_quest.error
