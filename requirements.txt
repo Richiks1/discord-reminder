@@ -1,4 +1,4 @@
 discord.py
-flask
 Pillow
-python-dotenv
+Flask
+gunicorn
