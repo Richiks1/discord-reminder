@@ -30,29 +30,17 @@ QUEST_DATA_FILE = os.path.join(SCRIPT_DIR, 'quests.json')
 BASE_IMAGE_FILE = os.path.join(SCRIPT_DIR, 'questboard.png')
 
 # --- Quest Data and Image Coordinates ---
+# REVERTED to your preferred shorter claim names
 QUEST_COORDINATES = {
     "sweetbonanza1k": (13, 108, 461, 326),
-    "wanteddeadorawild": (465, 107, 912, 326),
-    "bigbasssplash":    (918, 108, 1366, 326),
-    "vampyparty":       (15, 331, 461, 547),
-    "mines":            (464, 331, 912, 547),
-    "towers":           (918, 331, 1366, 547),
-    "raptordoublemax":  (15, 555, 461, 774),
-    "crazytime":        (464, 552, 912, 771),
-    "outsourced":       (918, 552, 1366, 769),
-}
-
-# --- Display Names for the !list command ---
-QUEST_DISPLAY_NAMES = {
-    "sweetbonanza1k": "Sweet Bonanza 1000",
-    "wanteddeadorawild": "Wanted Dead or a Wild",
-    "bigbasssplash": "Big Bass Splash",
-    "vampyparty": "Vampy Party",
-    "mines": "Mines",
-    "towers": "Towers",
-    "raptordoublemax": "Raptor Doublemax",
-    "crazytime": "Crazy Time",
-    "outsourced": "Outsourced",
+    "wanted":         (465, 107, 912, 326),
+    "bigbass":        (918, 108, 1366, 326),
+    "vampyparty":     (15, 331, 461, 547),
+    "mines":          (464, 331, 912, 547),
+    "towers":         (918, 331, 1366, 547),
+    "raptord":        (15, 555, 461, 774),
+    "crazytime":      (464, 552, 912, 771),
+    "outsourced":     (918, 552, 1366, 769),
 }
 
 # --- Flask Web Server Setup (Optional) ---
@@ -91,34 +79,20 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
-        # --- UPDATED: Load two separate fonts for different weights ---
         try:
-            # Bolder font for the first line ("Completed", "Requested")
-            font_path_line1 = os.path.join(SCRIPT_DIR, "Rubik-SemiBold.ttf")
-            font_line1 = ImageFont.truetype(font_path_line1, 30)
+            font_path = os.path.join(SCRIPT_DIR, "Rubik-Medium.ttf")
+            font = ImageFont.truetype(font_path, 30)
         except IOError:
-            print("WARNING: Rubik-SemiBold.ttf not found. Using default font for line 1.")
-            font_line1 = ImageFont.load_default()
-
-        try:
-            # Medium font for the second line ("by user")
-            font_path_line2 = os.path.join(SCRIPT_DIR, "Rubik-Medium.ttf")
-            font_line2 = ImageFont.truetype(font_path_line2, 30)
-        except IOError:
-            print("WARNING: Rubik-Medium.ttf not found. Using default font for line 2.")
-            font_line2 = font_line1 # Fallback to the other font if this one is missing
+            print("WARNING: Rubik-Medium.ttf not found. Using default font.")
+            font = ImageFont.load_default()
         
-        # Define the custom colors
-        color_line1 = (176, 176, 176, 230) # B0B0B0
-        color_line2 = (144, 144, 144, 230) # 909090
+        color_line1, color_line2 = (176, 176, 176, 230), (144, 144, 144, 230)
         color_checkmark = (0, 200, 83, 220)
 
         for quest_name, coords in QUEST_COORDINATES.items():
             quest_info = quest_data.get(quest_name, {})
             status = quest_info.get('status', 'unclaimed')
-
-            if status == 'unclaimed':
-                continue
+            if status == 'unclaimed': continue
 
             x1, y1, x2, y2 = coords
             box_coords, box_width, box_height = (x1, y1, x2, y2), x2 - x1, y2 - y1
@@ -132,39 +106,74 @@ def generate_quest_image():
             elif status == 'completed':
                 line1_text, line2_text, draw_checkmark = "Completed", f"by {claimer_name}", True
             
-            # --- UPDATED: Use the correct font for each line's calculations ---
-            line1_bbox = text_draw.textbbox((0,0), line1_text, font=font_line1)
-            line1_width = line1_bbox[2] - line1_bbox[0]
-            line1_height = line1_bbox[3] - line1_bbox[1]
-            
-            line2_bbox = text_draw.textbbox((0,0), line2_text, font=font_line2)
+            line1_bbox = text_draw.textbbox((0,0), line1_text, font=font)
+            line1_width, line_height = line1_bbox[2] - line1_bbox[0], line1_bbox[3] - line1_bbox[1]
+            line2_bbox = text_draw.textbbox((0,0), line2_text, font=font)
             line2_width = line2_bbox[2] - line2_bbox[0]
-            line2_height = line2_bbox[3] - line2_bbox[1]
-
             line_spacing = 25
-            total_text_height = line1_height + line_spacing + line2_height
+            total_text_height = line_height + line_spacing + line_height
             block_start_y = y1 + (box_height - total_text_height) // 2
-            line1_y = block_start_y
-            line2_y = block_start_y + line1_height + line_spacing
+            line1_y, line2_y = block_start_y, block_start_y + line_height + line_spacing
             
             checkmark_width = 30
             total_line1_width = line1_width + checkmark_width if draw_checkmark else line1_width
-            line1_start_x = x1 + (box_width - total_line1_width) // 2
-            line2_start_x = x1 + (box_width - line2_width) // 2
+            line1_start_x, line2_start_x = x1 + (box_width - total_line1_width) // 2, x1 + (box_width - line2_width) // 2
             
-            # --- UPDATED: Draw text with the correct font and color for each line ---
-            text_draw.text((line1_start_x, line1_y), line1_text, font=font_line1, fill=color_line1)
+            text_draw.text((line1_start_x, line1_y), line1_text, font=font, fill=color_line1)
             if draw_checkmark:
-                cx, cy = line1_start_x + line1_width + (checkmark_width / 2) + 10, line1_y + (line1_height / 2)
+                cx, cy = line1_start_x + line1_width + (checkmark_width / 2) + 10, line1_y + (line_height / 2)
                 p1, p2, p3 = (cx - 12, cy), (cx - 4, cy + 8), (cx + 12, cy - 8)
                 text_draw.line([p1, p2], fill=color_checkmark, width=6)
                 text_draw.line([p2, p3], fill=color_checkmark, width=6)
-            text_draw.text((line2_start_x, line2_y), line2_text, font=font_line2, fill=color_line2)
+            text_draw.text((line2_start_x, line2_y), line2_text, font=font, fill=color_line2)
 
         buffer = io.BytesIO()
         img.save(buffer, format='PNG', optimize=True)
         buffer.seek(0)
         return buffer
+
+def create_quest_list_embed():
+    """Creates the embed with the 3-column fixed grid of available quests."""
+    quest_data = get_quest_data()
+    embed = discord.Embed(title="Available Quests", color=discord.Color.blue())
+    
+    # --- NEW: Fixed Grid Layout Logic ---
+    # This grid defines the structure and names for each cell
+    quest_grid = [
+        ["sweetbonanza1k", "wanted", "bigbass"],
+        ["vampyparty", "mines", "towers"],
+        ["raptord", "crazytime", "outsourced"]
+    ]
+    # Define the width for each column to align the text
+    column_widths = [18, 12, 12] 
+    
+    grid_string = "```\n"
+    any_quests_available = False
+    
+    for row in quest_grid:
+        row_parts = []
+        for i, quest_name in enumerate(row):
+            # Check if this specific quest is available
+            if quest_data.get(quest_name, {}).get('status') == 'unclaimed':
+                any_quests_available = True
+                # Pad the name with spaces to match the column width
+                row_parts.append(quest_name.ljust(column_widths[i]))
+            else:
+                # If claimed, add empty space to keep alignment
+                row_parts.append("".ljust(column_widths[i]))
+        
+        # Add the completed row to the grid string
+        grid_string += " ".join(row_parts) + "\n"
+        
+    grid_string += "```"
+    
+    if any_quests_available:
+        embed.description = grid_string
+    else:
+        embed.description = "All quests have been claimed or completed!"
+    
+    embed.set_footer(text="Use the quest name above to claim it (e.g. !claim sweetbonanza1k)")
+    return embed
 
 @bot.command(name='list')
 async def list_quests(ctx):
@@ -172,32 +181,12 @@ async def list_quests(ctx):
     if buffer is None:
         await ctx.send("Sorry, an error occurred while generating the quest board.")
         return
-    quest_data = get_quest_data()
-    embed = discord.Embed(title="Available Quests", color=discord.Color.blue())
-    embed.set_footer(text="Use the listed command to claim a quest.")
-    all_quests_ordered = list(QUEST_COORDINATES.keys())
-    quests_per_column = 3 
-    column_contents = ["", "", ""]
-    any_quests_available = False
-
-    for i, quest_name in enumerate(all_quests_ordered):
-        column_index = i // quests_per_column
-        if quest_data.get(quest_name, {}).get('status') == 'unclaimed':
-            any_quests_available = True
-            display_name = QUEST_DISPLAY_NAMES.get(quest_name, quest_name.title())
-            column_contents[column_index] += f"**{display_name}**\n`!claim {quest_name}`\n\n"
-
-    if any_quests_available:
-        embed.add_field(name="\u200b", value=column_contents[0] or "\u200b", inline=True)
-        embed.add_field(name="\u200b", value=column_contents[1] or "\u200b", inline=True)
-        embed.add_field(name="\u200b", value=column_contents[2] or "\u200b", inline=True)
-    else:
-        embed.description = "All quests have been claimed or completed!"
-
-    await ctx.send(embed=embed, file=discord.File(buffer, 'current_quests.png'))
+    list_embed = create_quest_list_embed()
+    await ctx.send(embed=list_embed, file=discord.File(buffer, 'current_quests.png'))
 
 @bot.command(name='claim')
 async def claim_quest(ctx, quest_name: str, proof_link: str = None):
+    # This command remains the same
     quest_name = quest_name.lower()
     quest_data = get_quest_data()
     if quest_name not in QUEST_COORDINATES:
@@ -248,9 +237,7 @@ async def on_raw_reaction_add(payload):
     embed = message.embeds[0]
     quest_name = next((field.value for field in embed.fields if field.name == "Quest"), None)
     claimer_id_str = embed.footer.text.replace("Claimer ID: ", "")
-    if not quest_name or not claimer_id_str:
-        print("Could not find quest name or claimer ID in embed.")
-        return
+    if not quest_name or not claimer_id_str: return
     claimer_id = int(claimer_id_str)
     claimer = payload.member.guild.get_member(claimer_id)
     quest_data = get_quest_data()
@@ -262,21 +249,21 @@ async def on_raw_reaction_add(payload):
     if str(payload.emoji) == "✅":
         quest_data[quest_name]['status'] = 'completed'
         save_quest_data(quest_data)
-        new_embed.title = "✅ Quest Claim Approved"
-        new_embed.color = discord.Color.green()
+        new_embed.title, new_embed.color = "✅ Quest Claim Approved", discord.Color.green()
         if announcement_channel:
             msg_text = f"🎉 Congratulations to {claimer.mention if claimer else f'User ID {claimer_id}'} for completing **{quest_name}**! Approved."
             await announcement_channel.send(msg_text, file=discord.File(generate_quest_image(), 'current_quests.png'))
+            await announcement_channel.send(embed=create_quest_list_embed())
+
     elif str(payload.emoji) == "❌":
         quest_data[quest_name]['status'] = 'unclaimed'
-        quest_data[quest_name]['claimer_id'] = None
-        quest_data[quest_name]['claimer_name'] = None
+        quest_data[quest_name]['claimer_id'], quest_data[quest_name]['claimer_name'] = None, None
         save_quest_data(quest_data)
-        new_embed.title = "❌ Quest Claim Denied"
-        new_embed.color = discord.Color.red()
+        new_embed.title, new_embed.color = "❌ Quest Claim Denied", discord.Color.red()
         if announcement_channel:
             msg_text = f"ℹ️ The claim for **{quest_name}** by {claimer.mention if claimer else f'User ID {claimer_id}'} was denied. The quest is now open!"
             await announcement_channel.send(msg_text, file=discord.File(generate_quest_image(), 'current_quests.png'))
+            await announcement_channel.send(embed=create_quest_list_embed())
     else: return
 
     await message.edit(embed=new_embed)
@@ -291,6 +278,7 @@ async def reset_quests(ctx):
     buffer = generate_quest_image()
     if buffer:
         await ctx.send("The quest board is now clean:", file=discord.File(buffer, 'current_quests.png'))
+        await ctx.send(embed=create_quest_list_embed())
 
 @bot.event
 async def on_ready():
