@@ -32,7 +32,7 @@ BASE_IMAGE_FILE = os.path.join(SCRIPT_DIR, 'questboard.png')
 # --- Quest Data and Image Coordinates ---
 QUEST_COORDINATES = {
     "sweetbonanza1k": (13, 108, 461, 326),
-    "wanted":        (465, 107, 912, 326),
+    "wanted":         (465, 107, 912, 326),
     "bigbass":        (918, 108, 1366, 326),
     "vampyparty":     (15, 331, 461, 547),
     "mines":          (464, 331, 912, 547),
@@ -72,6 +72,7 @@ def save_quest_data(data):
     with open(QUEST_DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
+
 def generate_quest_image():
     """Generates the quest board image with current statuses."""
     quest_data = get_quest_data()
@@ -83,12 +84,23 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
+        # --- NEW: Dual Font Loading ---
+        # Load the regular font for text
         try:
-            font_path = os.path.join(SCRIPT_DIR, "NotoColorEmoji-Regular.ttf")
-            font = ImageFont.truetype(font_path, 30)
+            regular_font_path = os.path.join(SCRIPT_DIR, "arial.ttf")
+            regular_font = ImageFont.truetype(regular_font_path, 30)
         except IOError:
-            print("WARNING: NotoColorEmoji-Regular.ttf not found. Emojis may not render.")
-            font = ImageFont.load_default()
+            print("WARNING: arial.ttf not found. Using default font for text.")
+            regular_font = ImageFont.load_default()
+
+        # Load the emoji font
+        try:
+            emoji_font_path = os.path.join(SCRIPT_DIR, "NotoColorEmoji-Regular.ttf")
+            emoji_font = ImageFont.truetype(emoji_font_path, 30)
+        except IOError:
+            print("WARNING: NotoColorEmoji-Regular.ttf not found. Emojis will not render.")
+            # If emoji font is missing, use the regular font as a fallback
+            emoji_font = regular_font
 
         for quest_name, coords in QUEST_COORDINATES.items():
             quest_info = quest_data.get(quest_name, {})
@@ -102,39 +114,61 @@ def generate_quest_image():
             box_width = x2 - x1
             box_height = y2 - y1
 
+            # Apply blur
             blurred_box = img.crop(box_coords).filter(ImageFilter.GaussianBlur(radius=5))
             img.paste(blurred_box, box_coords)
 
             claimer_name = quest_info.get('claimer_name', 'Unknown')
-            line1, line2 = "", ""
+            line1_text, line1_emoji, line2_text = "", "", ""
 
             if status == 'pending':
-                line1 = "Requested"
-                line2 = f"by {claimer_name}"
+                line1_text = "Requested"
+                line2_text = f"by {claimer_name}"
             elif status == 'completed':
-                line1 = "Completed ✅"
-                line2 = f"by {claimer_name}"
+                line1_text = "Completed " # Note the space
+                line1_emoji = "✅"
+                line2_text = f"by {claimer_name}"
             
-            line1_bbox = text_draw.textbbox((0, 0), line1, font=font)
-            line1_width, line1_height = line1_bbox[2] - line1_bbox[0], line1_bbox[3] - line1_bbox[1]
-            line2_bbox = text_draw.textbbox((0, 0), line2, font=font)
-            line2_width = line2_bbox[2] - line2_bbox[0]
+            # --- NEW: Dual Font Drawing Logic ---
+            # Calculate widths for each part
+            line1_text_bbox = text_draw.textbbox((0,0), line1_text, font=regular_font)
+            line1_text_width = line1_text_bbox[2] - line1_text_bbox[0]
             
+            line1_emoji_bbox = text_draw.textbbox((0,0), line1_emoji, font=emoji_font)
+            line1_emoji_width = line1_emoji_bbox[2] - line1_emoji_bbox[0]
+            
+            line2_text_bbox = text_draw.textbbox((0,0), line2_text, font=regular_font)
+            line2_width = line2_text_bbox[2] - line2_text_bbox[0]
+
+            # Total width of the first line
+            total_line1_width = line1_text_width + line1_emoji_width
+
+            # Get height from the main text font
+            line_height = (line1_text_bbox[3] - line1_text_bbox[1])
             line_spacing = 10
-            total_text_height = line1_height + line_spacing + line1_height
+            total_text_height = line_height + line_spacing + line_height
 
-            line1_x = x1 + (box_width - line1_width) // 2
-            line2_x = x1 + (box_width - line2_width) // 2
+            # Calculate starting positions for centering the block
             block_start_y = y1 + (box_height - total_text_height) // 2
-            line1_y, line2_y = block_start_y, block_start_y + line1_height + line_spacing
-
-            text_draw.text((line1_x, line1_y), line1, font=font, fill=(255, 255, 255, 230))
-            text_draw.text((line2_x, line2_y), line2, font=font, fill=(255, 255, 255, 230))
+            line1_y = block_start_y
+            line2_y = block_start_y + line_height + line_spacing
+            
+            # Calculate X position for each line to be centered
+            line1_start_x = x1 + (box_width - total_line1_width) // 2
+            line2_start_x = x1 + (box_width - line2_width) // 2
+            
+            # Draw the text and emoji parts separately
+            text_draw.text((line1_start_x, line1_y), line1_text, font=regular_font, fill=(255, 255, 255, 230))
+            if line1_emoji: # Only draw emoji if it exists
+                text_draw.text((line1_start_x + line1_text_width, line1_y), line1_emoji, font=emoji_font, fill=(255, 255, 255, 230))
+            
+            text_draw.text((line2_start_x, line2_y), line2_text, font=regular_font, fill=(255, 255, 255, 230))
 
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
         buffer.seek(0)
         return buffer
+
 
 @bot.command(name='list')
 async def list_quests(ctx):
