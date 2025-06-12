@@ -32,14 +32,27 @@ BASE_IMAGE_FILE = os.path.join(SCRIPT_DIR, 'questboard.png')
 # --- Quest Data and Image Coordinates ---
 QUEST_COORDINATES = {
     "sweetbonanza1k": (13, 108, 461, 326),
-    "wanted":         (465, 107, 912, 326),
-    "bigbass":        (918, 108, 1366, 326),
-    "vampyparty":     (15, 331, 461, 547),
-    "mines":          (464, 331, 912, 547),
-    "towers":         (918, 331, 1366, 547),
-    "raptord":        (15, 555, 461, 774),
-    "crazytime":      (464, 552, 912, 771),
-    "outsourced":     (918, 552, 1366, 769),
+    "wanteddeadorawild": (465, 107, 912, 326),
+    "bigbasssplash":    (918, 108, 1366, 326),
+    "vampyparty":       (15, 331, 461, 547),
+    "mines":            (464, 331, 912, 547),
+    "towers":           (918, 331, 1366, 547),
+    "raptordoublemax":  (15, 555, 461, 774),
+    "crazytime":        (464, 552, 912, 771),
+    "outsourced":       (918, 552, 1366, 769),
+}
+
+# --- Display Names for the !list command ---
+QUEST_DISPLAY_NAMES = {
+    "sweetbonanza1k": "Sweet Bonanza 1000",
+    "wanteddeadorawild": "Wanted Dead or a Wild",
+    "bigbasssplash": "Big Bass Splash",
+    "vampyparty": "Vampy Party",
+    "mines": "Mines",
+    "towers": "Towers",
+    "raptordoublemax": "Raptor Doublemax",
+    "crazytime": "Crazy Time",
+    "outsourced": "Outsourced",
 }
 
 # --- Flask Web Server Setup (Optional) ---
@@ -78,12 +91,20 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
+        # --- UPDATED FONT AND COLORS ---
         try:
-            font_path = os.path.join(SCRIPT_DIR, "arial.ttf")
+            # Using Rubik-Medium.ttf for a "medium bold" look.
+            # Make sure this file is in the same folder as the script!
+            font_path = os.path.join(SCRIPT_DIR, "Rubik-Medium.ttf")
             font = ImageFont.truetype(font_path, 30)
         except IOError:
-            print("WARNING: arial.ttf not found. Using default font.")
+            print("WARNING: Rubik-Medium.ttf not found. Please download it from Google Fonts. Using default font.")
             font = ImageFont.load_default()
+        
+        # Define the new colors from Hex codes
+        color_line1 = (176, 176, 176, 230) # B0B0B0
+        color_line2 = (144, 144, 144, 230) # 909090
+        color_checkmark = (0, 200, 83, 220)  # A slightly adjusted vibrant green
 
         for quest_name, coords in QUEST_COORDINATES.items():
             quest_info = quest_data.get(quest_name, {})
@@ -118,13 +139,14 @@ def generate_quest_image():
             line1_start_x = x1 + (box_width - total_line1_width) // 2
             line2_start_x = x1 + (box_width - line2_width) // 2
             
-            text_draw.text((line1_start_x, line1_y), line1_text, font=font, fill=(255, 255, 255, 230))
+            # Draw text with the new custom colors
+            text_draw.text((line1_start_x, line1_y), line1_text, font=font, fill=color_line1)
             if draw_checkmark:
                 cx, cy = line1_start_x + line1_width + (checkmark_width / 2) + 10, line1_y + (line_height / 2)
                 p1, p2, p3 = (cx - 12, cy), (cx - 4, cy + 8), (cx + 12, cy - 8)
-                text_draw.line([p1, p2], fill=(0, 255, 0, 220), width=6)
-                text_draw.line([p2, p3], fill=(0, 255, 0, 220), width=6)
-            text_draw.text((line2_start_x, line2_y), line2_text, font=font, fill=(255, 255, 255, 230))
+                text_draw.line([p1, p2], fill=color_checkmark, width=6)
+                text_draw.line([p2, p3], fill=color_checkmark, width=6)
+            text_draw.text((line2_start_x, line2_y), line2_text, font=font, fill=color_line2)
 
         buffer = io.BytesIO()
         img.save(buffer, format='PNG', optimize=True)
@@ -133,47 +155,33 @@ def generate_quest_image():
 
 @bot.command(name='list')
 async def list_quests(ctx):
-    """Displays the quest board and lists all available quests in a 3-column layout."""
     buffer = generate_quest_image()
     if buffer is None:
         await ctx.send("Sorry, an error occurred while generating the quest board.")
         return
-
     quest_data = get_quest_data()
     embed = discord.Embed(title="Available Quests", color=discord.Color.blue())
     embed.set_footer(text="Use the listed command to claim a quest.")
-
-    # --- NEW 3-COLUMN LAYOUT LOGIC ---
     all_quests_ordered = list(QUEST_COORDINATES.keys())
-    # 9 quests total, 3 quests per column
     quests_per_column = 3 
-    
-    # A list to hold the formatted string for each of the 3 columns
     column_contents = ["", "", ""]
     any_quests_available = False
 
     for i, quest_name in enumerate(all_quests_ordered):
-        # Determine which column this quest belongs to (0, 1, or 2)
         column_index = i // quests_per_column
-        
         if quest_data.get(quest_name, {}).get('status') == 'unclaimed':
             any_quests_available = True
-            # Capitalize the first letter for a clean display name
-            display_name = quest_name.title()
-            # Append the formatted quest string to the correct column's content
+            display_name = QUEST_DISPLAY_NAMES.get(quest_name, quest_name.title())
             column_contents[column_index] += f"**{display_name}**\n`!claim {quest_name}`\n\n"
 
     if any_quests_available:
-        # Add each column's content as an inline field.
-        # Use a zero-width space if a column is empty to maintain the layout.
-        embed.add_field(name="Column 1", value=column_contents[0] or "\u200b", inline=True)
-        embed.add_field(name="Column 2", value=column_contents[1] or "\u200b", inline=True)
-        embed.add_field(name="Column 3", value=column_contents[2] or "\u200b", inline=True)
+        embed.add_field(name="\u200b", value=column_contents[0] or "\u200b", inline=True)
+        embed.add_field(name="\u200b", value=column_contents[1] or "\u200b", inline=True)
+        embed.add_field(name="\u200b", value=column_contents[2] or "\u200b", inline=True)
     else:
         embed.description = "All quests have been claimed or completed!"
 
     await ctx.send(embed=embed, file=discord.File(buffer, 'current_quests.png'))
-
 
 @bot.command(name='claim')
 async def claim_quest(ctx, quest_name: str, proof_link: str = None):
