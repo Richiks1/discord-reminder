@@ -78,8 +78,6 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
-        # Using a standard font like Arial is now more reliable.
-        # Ensure you have 'arial.ttf' in your bot's folder.
         try:
             font_path = os.path.join(SCRIPT_DIR, "arial.ttf")
             font = ImageFont.truetype(font_path, 30)
@@ -95,96 +93,87 @@ def generate_quest_image():
                 continue
 
             x1, y1, x2, y2 = coords
-            box_coords = (x1, y1, x2, y2)
-            box_width = x2 - x1
-            box_height = y2 - y1
-
+            box_coords, box_width, box_height = (x1, y1, x2, y2), x2 - x1, y2 - y1
             blurred_box = img.crop(box_coords).filter(ImageFilter.GaussianBlur(radius=5))
             img.paste(blurred_box, box_coords)
 
             claimer_name = quest_info.get('claimer_name', 'Unknown')
-            line1_text, line2_text = "", ""
-            draw_checkmark = False
-
+            line1_text, line2_text, draw_checkmark = "", "", False
             if status == 'pending':
-                line1_text = "Requested"
-                line2_text = f"by {claimer_name}"
+                line1_text, line2_text = "Requested", f"by {claimer_name}"
             elif status == 'completed':
-                line1_text = "Completed"
-                line2_text = f"by {claimer_name}"
-                draw_checkmark = True
+                line1_text, line2_text, draw_checkmark = "Completed", f"by {claimer_name}", True
             
-            # --- UPDATED: Line Spacing and Text Drawing Logic ---
             line1_bbox = text_draw.textbbox((0,0), line1_text, font=font)
-            line1_width = line1_bbox[2] - line1_bbox[0]
-            line_height = line1_bbox[3] - line1_bbox[1]
-            
+            line1_width, line_height = line1_bbox[2] - line1_bbox[0], line1_bbox[3] - line1_bbox[1]
             line2_bbox = text_draw.textbbox((0,0), line2_text, font=font)
             line2_width = line2_bbox[2] - line2_bbox[0]
-
-            # Increased line spacing for a bigger gap
             line_spacing = 25
             total_text_height = line_height + line_spacing + line_height
-            
-            # Calculate Y positions
             block_start_y = y1 + (box_height - total_text_height) // 2
-            line1_y = block_start_y
-            line2_y = block_start_y + line_height + line_spacing
-
-            # --- NEW: Checkmark drawing logic ---
-            # The total width on line 1 includes the text and the checkmark
-            checkmark_width = 30 # The space the checkmark will occupy
-            total_line1_width = line1_width + checkmark_width if draw_checkmark else line1_width
+            line1_y, line2_y = block_start_y, block_start_y + line_height + line_spacing
             
-            # Center the entire line (text + checkmark)
+            checkmark_width = 30
+            total_line1_width = line1_width + checkmark_width if draw_checkmark else line1_width
             line1_start_x = x1 + (box_width - total_line1_width) // 2
             line2_start_x = x1 + (box_width - line2_width) // 2
             
-            # Draw the first line of text
             text_draw.text((line1_start_x, line1_y), line1_text, font=font, fill=(255, 255, 255, 230))
-            
-            # Manually draw the checkmark if needed
             if draw_checkmark:
-                # Position the checkmark to the right of the text
-                cx = line1_start_x + line1_width + (checkmark_width / 2) + 10
-                cy = line1_y + (line_height / 2)
-                
-                # Define the points of the checkmark
-                p1 = (cx - 12, cy)
-                p2 = (cx - 4, cy + 8)
-                p3 = (cx + 12, cy - 8)
-                
-                # Draw the two lines of the checkmark
+                cx, cy = line1_start_x + line1_width + (checkmark_width / 2) + 10, line1_y + (line_height / 2)
+                p1, p2, p3 = (cx - 12, cy), (cx - 4, cy + 8), (cx + 12, cy - 8)
                 text_draw.line([p1, p2], fill=(0, 255, 0, 220), width=6)
                 text_draw.line([p2, p3], fill=(0, 255, 0, 220), width=6)
-
-            # Draw the second line of text
             text_draw.text((line2_start_x, line2_y), line2_text, font=font, fill=(255, 255, 255, 230))
 
         buffer = io.BytesIO()
-        img.save(buffer, format='PNG')
+        img.save(buffer, format='PNG', optimize=True)
         buffer.seek(0)
         return buffer
 
 @bot.command(name='list')
 async def list_quests(ctx):
+    """Displays the quest board and lists all available quests in a 3-column layout."""
     buffer = generate_quest_image()
     if buffer is None:
         await ctx.send("Sorry, an error occurred while generating the quest board.")
         return
+
     quest_data = get_quest_data()
     embed = discord.Embed(title="Available Quests", color=discord.Color.blue())
     embed.set_footer(text="Use the listed command to claim a quest.")
-    available_quests = []
-    for quest_name in QUEST_COORDINATES.keys():
+
+    # --- NEW 3-COLUMN LAYOUT LOGIC ---
+    all_quests_ordered = list(QUEST_COORDINATES.keys())
+    # 9 quests total, 3 quests per column
+    quests_per_column = 3 
+    
+    # A list to hold the formatted string for each of the 3 columns
+    column_contents = ["", "", ""]
+    any_quests_available = False
+
+    for i, quest_name in enumerate(all_quests_ordered):
+        # Determine which column this quest belongs to (0, 1, or 2)
+        column_index = i // quests_per_column
+        
         if quest_data.get(quest_name, {}).get('status') == 'unclaimed':
-            display_name = ''.join([' ' + char if char.isupper() else char.title() for char in quest_name]).lstrip()
-            available_quests.append(f"**{display_name}**\n`!claim {quest_name}`\n")
-    if available_quests:
-        embed.description = "\n".join(available_quests)
+            any_quests_available = True
+            # Capitalize the first letter for a clean display name
+            display_name = quest_name.title()
+            # Append the formatted quest string to the correct column's content
+            column_contents[column_index] += f"**{display_name}**\n`!claim {quest_name}`\n\n"
+
+    if any_quests_available:
+        # Add each column's content as an inline field.
+        # Use a zero-width space if a column is empty to maintain the layout.
+        embed.add_field(name="Column 1", value=column_contents[0] or "\u200b", inline=True)
+        embed.add_field(name="Column 2", value=column_contents[1] or "\u200b", inline=True)
+        embed.add_field(name="Column 3", value=column_contents[2] or "\u200b", inline=True)
     else:
         embed.description = "All quests have been claimed or completed!"
+
     await ctx.send(embed=embed, file=discord.File(buffer, 'current_quests.png'))
+
 
 @bot.command(name='claim')
 async def claim_quest(ctx, quest_name: str, proof_link: str = None):
@@ -230,12 +219,9 @@ async def claim_quest(ctx, quest_name: str, proof_link: str = None):
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id or payload.channel_id != ADMIN_CHANNEL_ID: return
     channel = bot.get_channel(payload.channel_id)
-    try:
-        message = await channel.fetch_message(payload.message_id)
-    except discord.NotFound:
-        return
-    if not message.embeds or message.author.id != bot.user.id or "Pending" not in message.embeds[0].title:
-        return
+    try: message = await channel.fetch_message(payload.message_id)
+    except discord.NotFound: return
+    if not message.embeds or message.author.id != bot.user.id or "Pending" not in message.embeds[0].title: return
     reactor = payload.member
     if not reactor or not reactor.guild_permissions.manage_guild: return
     embed = message.embeds[0]
@@ -270,8 +256,7 @@ async def on_raw_reaction_add(payload):
         if announcement_channel:
             msg_text = f"ℹ️ The claim for **{quest_name}** by {claimer.mention if claimer else f'User ID {claimer_id}'} was denied. The quest is now open!"
             await announcement_channel.send(msg_text, file=discord.File(generate_quest_image(), 'current_quests.png'))
-    else:
-        return
+    else: return
 
     await message.edit(embed=new_embed)
     await message.clear_reactions()
@@ -293,14 +278,10 @@ async def on_ready():
 
 def run_bot():
     if TOKEN:
-        try:
-            bot.run(TOKEN)
-        except discord.errors.LoginFailure:
-            print("FATAL ERROR: Invalid Discord token.")
-        except Exception as e:
-            print(f"An unexpected error occurred: {e}")
-    else:
-        print("FATAL ERROR: DISCORD_TOKEN not found in environment variables.")
+        try: bot.run(TOKEN)
+        except discord.errors.LoginFailure: print("FATAL ERROR: Invalid Discord token.")
+        except Exception as e: print(f"An unexpected error occurred: {e}")
+    else: print("FATAL ERROR: DISCORD_TOKEN not found in environment variables.")
 
 if __name__ == "__main__":
     flask_thread = Thread(target=run_flask)
