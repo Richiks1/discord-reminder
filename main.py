@@ -91,20 +91,19 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
-        # --- UPDATED FONT AND COLORS ---
+        # --- UPDATED FONT ---
         try:
-            # Using Rubik-Medium.ttf for a "medium bold" look.
+            # Using Rubik-SemiBold.ttf for a bolder look.
             # Make sure this file is in the same folder as the script!
-            font_path = os.path.join(SCRIPT_DIR, "Rubik-Medium.ttf")
+            font_path = os.path.join(SCRIPT_DIR, "Rubik-SemiBold.ttf")
             font = ImageFont.truetype(font_path, 30)
         except IOError:
-            print("WARNING: Rubik-Medium.ttf not found. Please download it from Google Fonts. Using default font.")
+            print("WARNING: Rubik-SemiBold.ttf not found. Please download it from Google Fonts. Using default font.")
             font = ImageFont.load_default()
         
-        # Define the new colors from Hex codes
         color_line1 = (176, 176, 176, 230) # B0B0B0
         color_line2 = (144, 144, 144, 230) # 909090
-        color_checkmark = (0, 200, 83, 220)  # A slightly adjusted vibrant green
+        color_checkmark = (0, 200, 83, 220)
 
         for quest_name, coords in QUEST_COORDINATES.items():
             quest_info = quest_data.get(quest_name, {})
@@ -139,7 +138,6 @@ def generate_quest_image():
             line1_start_x = x1 + (box_width - total_line1_width) // 2
             line2_start_x = x1 + (box_width - line2_width) // 2
             
-            # Draw text with the new custom colors
             text_draw.text((line1_start_x, line1_y), line1_text, font=font, fill=color_line1)
             if draw_checkmark:
                 cx, cy = line1_start_x + line1_width + (checkmark_width / 2) + 10, line1_y + (line_height / 2)
