@@ -54,7 +54,6 @@ def run_flask():
 
 # --- Bot Logic ---
 def get_quest_data():
-    """Loads quest data from the JSON file."""
     if not os.path.exists(QUEST_DATA_FILE):
         data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
         with open(QUEST_DATA_FILE, 'w') as f: json.dump(data, f, indent=4)
@@ -68,13 +67,10 @@ def get_quest_data():
         return data
 
 def save_quest_data(data):
-    """Saves the quest data to the JSON file."""
     with open(QUEST_DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-
 def generate_quest_image():
-    """Generates the quest board image with current statuses."""
     quest_data = get_quest_data()
     if not os.path.exists(BASE_IMAGE_FILE):
         print(f"ERROR: Base image not found at {BASE_IMAGE_FILE}")
@@ -84,22 +80,18 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
-        # --- NEW: Dual Font Loading ---
-        # Load the regular font for text
+        # --- DUAL FONT LOADING ---
         try:
             regular_font_path = os.path.join(SCRIPT_DIR, "arial.ttf")
             regular_font = ImageFont.truetype(regular_font_path, 30)
         except IOError:
             print("WARNING: arial.ttf not found. Using default font for text.")
             regular_font = ImageFont.load_default()
-
-        # Load the emoji font
         try:
             emoji_font_path = os.path.join(SCRIPT_DIR, "NotoColorEmoji-Regular.ttf")
             emoji_font = ImageFont.truetype(emoji_font_path, 30)
         except IOError:
             print("WARNING: NotoColorEmoji-Regular.ttf not found. Emojis will not render.")
-            # If emoji font is missing, use the regular font as a fallback
             emoji_font = regular_font
 
         for quest_name, coords in QUEST_COORDINATES.items():
@@ -114,7 +106,6 @@ def generate_quest_image():
             box_width = x2 - x1
             box_height = y2 - y1
 
-            # Apply blur
             blurred_box = img.crop(box_coords).filter(ImageFilter.GaussianBlur(radius=5))
             img.paste(blurred_box, box_coords)
 
@@ -125,43 +116,33 @@ def generate_quest_image():
                 line1_text = "Requested"
                 line2_text = f"by {claimer_name}"
             elif status == 'completed':
-                line1_text = "Completed " # Note the space
+                line1_text = "Completed "
                 line1_emoji = "✅"
                 line2_text = f"by {claimer_name}"
             
-            # --- NEW: Dual Font Drawing Logic ---
-            # Calculate widths for each part
+            # --- DUAL FONT DRAWING LOGIC ---
             line1_text_bbox = text_draw.textbbox((0,0), line1_text, font=regular_font)
             line1_text_width = line1_text_bbox[2] - line1_text_bbox[0]
-            
             line1_emoji_bbox = text_draw.textbbox((0,0), line1_emoji, font=emoji_font)
             line1_emoji_width = line1_emoji_bbox[2] - line1_emoji_bbox[0]
-            
             line2_text_bbox = text_draw.textbbox((0,0), line2_text, font=regular_font)
             line2_width = line2_text_bbox[2] - line2_text_bbox[0]
 
-            # Total width of the first line
             total_line1_width = line1_text_width + line1_emoji_width
-
-            # Get height from the main text font
             line_height = (line1_text_bbox[3] - line1_text_bbox[1])
             line_spacing = 10
             total_text_height = line_height + line_spacing + line_height
 
-            # Calculate starting positions for centering the block
             block_start_y = y1 + (box_height - total_text_height) // 2
             line1_y = block_start_y
             line2_y = block_start_y + line_height + line_spacing
             
-            # Calculate X position for each line to be centered
             line1_start_x = x1 + (box_width - total_line1_width) // 2
             line2_start_x = x1 + (box_width - line2_width) // 2
             
-            # Draw the text and emoji parts separately
             text_draw.text((line1_start_x, line1_y), line1_text, font=regular_font, fill=(255, 255, 255, 230))
-            if line1_emoji: # Only draw emoji if it exists
+            if line1_emoji:
                 text_draw.text((line1_start_x + line1_text_width, line1_y), line1_emoji, font=emoji_font, fill=(255, 255, 255, 230))
-            
             text_draw.text((line2_start_x, line2_y), line2_text, font=regular_font, fill=(255, 255, 255, 230))
 
         buffer = io.BytesIO()
@@ -169,75 +150,59 @@ def generate_quest_image():
         buffer.seek(0)
         return buffer
 
-
 @bot.command(name='list')
 async def list_quests(ctx):
-    """Displays the quest board and lists all available quests."""
     buffer = generate_quest_image()
     if buffer is None:
         await ctx.send("Sorry, an error occurred while generating the quest board.")
         return
-
     quest_data = get_quest_data()
-    
     embed = discord.Embed(title="Available Quests", color=discord.Color.blue())
     embed.set_footer(text="Use the listed command to claim a quest.")
-
     available_quests = []
     for quest_name in QUEST_COORDINATES.keys():
         if quest_data.get(quest_name, {}).get('status') == 'unclaimed':
             display_name = ''.join([' ' + char if char.isupper() else char.title() for char in quest_name]).lstrip()
             available_quests.append(f"**{display_name}**\n`!claim {quest_name}`\n")
-            
     if available_quests:
         embed.description = "\n".join(available_quests)
     else:
         embed.description = "All quests have been claimed or completed!"
-
     await ctx.send(embed=embed, file=discord.File(buffer, 'current_quests.png'))
 
 @bot.command(name='claim')
 async def claim_quest(ctx, quest_name: str, proof_link: str = None):
     quest_name = quest_name.lower()
     quest_data = get_quest_data()
-
     if quest_name not in QUEST_COORDINATES:
         await ctx.send(f"'{quest_name}' is not a valid quest name. Use `!list` to see available quests.")
         return
-        
     if not ctx.message.attachments and proof_link is None:
         await ctx.send("You must attach proof or provide a replay link.")
         return
-
     quest_info = quest_data[quest_name]
     if quest_info['status'] != 'unclaimed':
         await ctx.send(f"Sorry, quest '{quest_name}' is already claimed or completed.")
         return
-
     quest_info['status'] = 'pending'
     quest_info['claimer_id'] = ctx.author.id
     quest_info['claimer_name'] = ctx.author.display_name
     save_quest_data(quest_data)
-
     buffer = generate_quest_image()
     await ctx.send(f"⏳ {ctx.author.mention} has claimed **{quest_name}**! Your claim is now under review.", file=discord.File(buffer, 'current_quests.png'))
-    
     admin_channel = bot.get_channel(ADMIN_CHANNEL_ID)
     if not admin_channel: return
-
     embed = discord.Embed(title="⏳ New Pending Quest Claim!", color=discord.Color.orange())
     embed.add_field(name="Claimer", value=ctx.author.mention, inline=False)
     embed.add_field(name="Quest", value=quest_name, inline=False)
     embed.add_field(name="Original Message", value=f"[Jump to Message]({ctx.message.jump_url})", inline=False)
     embed.set_footer(text=f"Claimer ID: {ctx.author.id}")
-    
     if ctx.message.attachments:
         attachment = ctx.message.attachments[0]
         if attachment.content_type and attachment.content_type.startswith('image/'):
             embed.set_image(url=attachment.url)
     elif proof_link and any(ext in proof_link.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
         embed.set_image(url=proof_link)
-    
     try:
         msg = await admin_channel.send(embed=embed)
         await msg.add_reaction("✅")
@@ -247,52 +212,44 @@ async def claim_quest(ctx, quest_name: str, proof_link: str = None):
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    """Handles admin reactions for approving/denying quest claims."""
     if payload.user_id == bot.user.id or payload.channel_id != ADMIN_CHANNEL_ID: return
-    
     channel = bot.get_channel(payload.channel_id)
     try:
         message = await channel.fetch_message(payload.message_id)
     except discord.NotFound:
         return
-
     if not message.embeds or message.author.id != bot.user.id or "Pending" not in message.embeds[0].title:
         return
-
     reactor = payload.member
     if not reactor or not reactor.guild_permissions.manage_guild: return
-    
     embed = message.embeds[0]
-    
     quest_name = next((field.value for field in embed.fields if field.name == "Quest"), None)
     claimer_id_str = embed.footer.text.replace("Claimer ID: ", "")
-
     if not quest_name or not claimer_id_str:
         print("Could not find quest name or claimer ID in embed.")
         return
-        
     claimer_id = int(claimer_id_str)
     claimer = payload.member.guild.get_member(claimer_id)
     quest_data = get_quest_data()
-
     if quest_name not in quest_data: return
-    
     announcement_channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
     new_embed = embed.copy()
     new_embed.add_field(name="Moderator", value=reactor.mention)
 
+    # --- LOGIC ORDER FIX ---
     if str(payload.emoji) == "✅":
         quest_data[quest_name]['status'] = 'completed'
+        save_quest_data(quest_data)  # SAVE before generating the image
         new_embed.title = "✅ Quest Claim Approved"
         new_embed.color = discord.Color.green()
         if announcement_channel:
             msg_text = f"🎉 Congratulations to {claimer.mention if claimer else f'User ID {claimer_id}'} for completing **{quest_name}**! Approved."
             await announcement_channel.send(msg_text, file=discord.File(generate_quest_image(), 'current_quests.png'))
-    
     elif str(payload.emoji) == "❌":
         quest_data[quest_name]['status'] = 'unclaimed'
         quest_data[quest_name]['claimer_id'] = None
         quest_data[quest_name]['claimer_name'] = None
+        save_quest_data(quest_data) # SAVE before generating the image
         new_embed.title = "❌ Quest Claim Denied"
         new_embed.color = discord.Color.red()
         if announcement_channel:
@@ -301,14 +258,12 @@ async def on_raw_reaction_add(payload):
     else:
         return
 
-    save_quest_data(quest_data)
     await message.edit(embed=new_embed)
     await message.clear_reactions()
 
 @bot.command(name='resetquests', hidden=True)
 @commands.has_permissions(administrator=True)
 async def reset_quests(ctx):
-    """Resets all quests to 'unclaimed'."""
     default_data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
     save_quest_data(default_data)
     await ctx.send("✅ All quests have been reset.")
@@ -333,7 +288,6 @@ def run_bot():
         print("FATAL ERROR: DISCORD_TOKEN not found in environment variables.")
 
 if __name__ == "__main__":
-    # The web server is required for hosting platforms like Render.
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
