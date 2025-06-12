@@ -59,16 +59,14 @@ def get_quest_data():
         with open(QUEST_DATA_FILE, 'w') as f: json.dump(data, f, indent=4)
         return data
     try:
-        with open(QUEST_DATA_FILE, 'r') as f:
-            return json.load(f)
+        with open(QUEST_DATA_FILE, 'r') as f: return json.load(f)
     except (json.JSONDecodeError, FileNotFoundError):
         data = {name: {"status": "unclaimed", "claimer_id": None, "claimer_name": None} for name in QUEST_COORDINATES.keys()}
         with open(QUEST_DATA_FILE, 'w') as f: json.dump(data, f, indent=4)
         return data
 
 def save_quest_data(data):
-    with open(QUEST_DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
+    with open(QUEST_DATA_FILE, 'w') as f: json.dump(data, f, indent=4)
 
 def generate_quest_image():
     quest_data = get_quest_data()
@@ -80,19 +78,14 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
-        # --- DUAL FONT LOADING ---
+        # Using a standard font like Arial is now more reliable.
+        # Ensure you have 'arial.ttf' in your bot's folder.
         try:
-            regular_font_path = os.path.join(SCRIPT_DIR, "arial.ttf")
-            regular_font = ImageFont.truetype(regular_font_path, 30)
+            font_path = os.path.join(SCRIPT_DIR, "arial.ttf")
+            font = ImageFont.truetype(font_path, 30)
         except IOError:
-            print("WARNING: arial.ttf not found. Using default font for text.")
-            regular_font = ImageFont.load_default()
-        try:
-            emoji_font_path = os.path.join(SCRIPT_DIR, "NotoColorEmoji-Regular.ttf")
-            emoji_font = ImageFont.truetype(emoji_font_path, 30)
-        except IOError:
-            print("WARNING: NotoColorEmoji-Regular.ttf not found. Emojis will not render.")
-            emoji_font = regular_font
+            print("WARNING: arial.ttf not found. Using default font.")
+            font = ImageFont.load_default()
 
         for quest_name, coords in QUEST_COORDINATES.items():
             quest_info = quest_data.get(quest_name, {})
@@ -110,40 +103,63 @@ def generate_quest_image():
             img.paste(blurred_box, box_coords)
 
             claimer_name = quest_info.get('claimer_name', 'Unknown')
-            line1_text, line1_emoji, line2_text = "", "", ""
+            line1_text, line2_text = "", ""
+            draw_checkmark = False
 
             if status == 'pending':
                 line1_text = "Requested"
                 line2_text = f"by {claimer_name}"
             elif status == 'completed':
-                line1_text = "Completed "
-                line1_emoji = "✅"
+                line1_text = "Completed"
                 line2_text = f"by {claimer_name}"
+                draw_checkmark = True
             
-            # --- DUAL FONT DRAWING LOGIC ---
-            line1_text_bbox = text_draw.textbbox((0,0), line1_text, font=regular_font)
-            line1_text_width = line1_text_bbox[2] - line1_text_bbox[0]
-            line1_emoji_bbox = text_draw.textbbox((0,0), line1_emoji, font=emoji_font)
-            line1_emoji_width = line1_emoji_bbox[2] - line1_emoji_bbox[0]
-            line2_text_bbox = text_draw.textbbox((0,0), line2_text, font=regular_font)
-            line2_width = line2_text_bbox[2] - line2_text_bbox[0]
+            # --- UPDATED: Line Spacing and Text Drawing Logic ---
+            line1_bbox = text_draw.textbbox((0,0), line1_text, font=font)
+            line1_width = line1_bbox[2] - line1_bbox[0]
+            line_height = line1_bbox[3] - line1_bbox[1]
+            
+            line2_bbox = text_draw.textbbox((0,0), line2_text, font=font)
+            line2_width = line2_bbox[2] - line2_bbox[0]
 
-            total_line1_width = line1_text_width + line1_emoji_width
-            line_height = (line1_text_bbox[3] - line1_text_bbox[1])
-            line_spacing = 10
+            # Increased line spacing for a bigger gap
+            line_spacing = 25
             total_text_height = line_height + line_spacing + line_height
-
+            
+            # Calculate Y positions
             block_start_y = y1 + (box_height - total_text_height) // 2
             line1_y = block_start_y
             line2_y = block_start_y + line_height + line_spacing
+
+            # --- NEW: Checkmark drawing logic ---
+            # The total width on line 1 includes the text and the checkmark
+            checkmark_width = 30 # The space the checkmark will occupy
+            total_line1_width = line1_width + checkmark_width if draw_checkmark else line1_width
             
+            # Center the entire line (text + checkmark)
             line1_start_x = x1 + (box_width - total_line1_width) // 2
             line2_start_x = x1 + (box_width - line2_width) // 2
             
-            text_draw.text((line1_start_x, line1_y), line1_text, font=regular_font, fill=(255, 255, 255, 230))
-            if line1_emoji:
-                text_draw.text((line1_start_x + line1_text_width, line1_y), line1_emoji, font=emoji_font, fill=(255, 255, 255, 230))
-            text_draw.text((line2_start_x, line2_y), line2_text, font=regular_font, fill=(255, 255, 255, 230))
+            # Draw the first line of text
+            text_draw.text((line1_start_x, line1_y), line1_text, font=font, fill=(255, 255, 255, 230))
+            
+            # Manually draw the checkmark if needed
+            if draw_checkmark:
+                # Position the checkmark to the right of the text
+                cx = line1_start_x + line1_width + (checkmark_width / 2) + 10
+                cy = line1_y + (line_height / 2)
+                
+                # Define the points of the checkmark
+                p1 = (cx - 12, cy)
+                p2 = (cx - 4, cy + 8)
+                p3 = (cx + 12, cy - 8)
+                
+                # Draw the two lines of the checkmark
+                text_draw.line([p1, p2], fill=(0, 255, 0, 220), width=6)
+                text_draw.line([p2, p3], fill=(0, 255, 0, 220), width=6)
+
+            # Draw the second line of text
+            text_draw.text((line2_start_x, line2_y), line2_text, font=font, fill=(255, 255, 255, 230))
 
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
@@ -236,10 +252,9 @@ async def on_raw_reaction_add(payload):
     new_embed = embed.copy()
     new_embed.add_field(name="Moderator", value=reactor.mention)
 
-    # --- LOGIC ORDER FIX ---
     if str(payload.emoji) == "✅":
         quest_data[quest_name]['status'] = 'completed'
-        save_quest_data(quest_data)  # SAVE before generating the image
+        save_quest_data(quest_data)
         new_embed.title = "✅ Quest Claim Approved"
         new_embed.color = discord.Color.green()
         if announcement_channel:
@@ -249,7 +264,7 @@ async def on_raw_reaction_add(payload):
         quest_data[quest_name]['status'] = 'unclaimed'
         quest_data[quest_name]['claimer_id'] = None
         quest_data[quest_name]['claimer_name'] = None
-        save_quest_data(quest_data) # SAVE before generating the image
+        save_quest_data(quest_data)
         new_embed.title = "❌ Quest Claim Denied"
         new_embed.color = discord.Color.red()
         if announcement_channel:
