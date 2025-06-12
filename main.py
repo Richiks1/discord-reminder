@@ -91,16 +91,24 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
-        # --- UPDATED FONT ---
+        # --- UPDATED: Load two separate fonts for different weights ---
         try:
-            # Using Rubik-SemiBold.ttf for a bolder look.
-            # Make sure this file is in the same folder as the script!
-            font_path = os.path.join(SCRIPT_DIR, "Rubik-SemiBold.ttf")
-            font = ImageFont.truetype(font_path, 30)
+            # Bolder font for the first line ("Completed", "Requested")
+            font_path_line1 = os.path.join(SCRIPT_DIR, "Rubik-SemiBold.ttf")
+            font_line1 = ImageFont.truetype(font_path_line1, 30)
         except IOError:
-            print("WARNING: Rubik-SemiBold.ttf not found. Please download it from Google Fonts. Using default font.")
-            font = ImageFont.load_default()
+            print("WARNING: Rubik-SemiBold.ttf not found. Using default font for line 1.")
+            font_line1 = ImageFont.load_default()
+
+        try:
+            # Medium font for the second line ("by user")
+            font_path_line2 = os.path.join(SCRIPT_DIR, "Rubik-Medium.ttf")
+            font_line2 = ImageFont.truetype(font_path_line2, 30)
+        except IOError:
+            print("WARNING: Rubik-Medium.ttf not found. Using default font for line 2.")
+            font_line2 = font_line1 # Fallback to the other font if this one is missing
         
+        # Define the custom colors
         color_line1 = (176, 176, 176, 230) # B0B0B0
         color_line2 = (144, 144, 144, 230) # 909090
         color_checkmark = (0, 200, 83, 220)
@@ -124,27 +132,34 @@ def generate_quest_image():
             elif status == 'completed':
                 line1_text, line2_text, draw_checkmark = "Completed", f"by {claimer_name}", True
             
-            line1_bbox = text_draw.textbbox((0,0), line1_text, font=font)
-            line1_width, line_height = line1_bbox[2] - line1_bbox[0], line1_bbox[3] - line1_bbox[1]
-            line2_bbox = text_draw.textbbox((0,0), line2_text, font=font)
+            # --- UPDATED: Use the correct font for each line's calculations ---
+            line1_bbox = text_draw.textbbox((0,0), line1_text, font=font_line1)
+            line1_width = line1_bbox[2] - line1_bbox[0]
+            line1_height = line1_bbox[3] - line1_bbox[1]
+            
+            line2_bbox = text_draw.textbbox((0,0), line2_text, font=font_line2)
             line2_width = line2_bbox[2] - line2_bbox[0]
+            line2_height = line2_bbox[3] - line2_bbox[1]
+
             line_spacing = 25
-            total_text_height = line_height + line_spacing + line_height
+            total_text_height = line1_height + line_spacing + line2_height
             block_start_y = y1 + (box_height - total_text_height) // 2
-            line1_y, line2_y = block_start_y, block_start_y + line_height + line_spacing
+            line1_y = block_start_y
+            line2_y = block_start_y + line1_height + line_spacing
             
             checkmark_width = 30
             total_line1_width = line1_width + checkmark_width if draw_checkmark else line1_width
             line1_start_x = x1 + (box_width - total_line1_width) // 2
             line2_start_x = x1 + (box_width - line2_width) // 2
             
-            text_draw.text((line1_start_x, line1_y), line1_text, font=font, fill=color_line1)
+            # --- UPDATED: Draw text with the correct font and color for each line ---
+            text_draw.text((line1_start_x, line1_y), line1_text, font=font_line1, fill=color_line1)
             if draw_checkmark:
-                cx, cy = line1_start_x + line1_width + (checkmark_width / 2) + 10, line1_y + (line_height / 2)
+                cx, cy = line1_start_x + line1_width + (checkmark_width / 2) + 10, line1_y + (line1_height / 2)
                 p1, p2, p3 = (cx - 12, cy), (cx - 4, cy + 8), (cx + 12, cy - 8)
                 text_draw.line([p1, p2], fill=color_checkmark, width=6)
                 text_draw.line([p2, p3], fill=color_checkmark, width=6)
-            text_draw.text((line2_start_x, line2_y), line2_text, font=font, fill=color_line2)
+            text_draw.text((line2_start_x, line2_y), line2_text, font=font_line2, fill=color_line2)
 
         buffer = io.BytesIO()
         img.save(buffer, format='PNG', optimize=True)
