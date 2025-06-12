@@ -30,22 +30,16 @@ QUEST_DATA_FILE = os.path.join(SCRIPT_DIR, 'quests.json')
 BASE_IMAGE_FILE = os.path.join(SCRIPT_DIR, 'questboard.png')
 
 # --- Quest Data and Image Coordinates ---
-# Quest names have been updated to match your questboard.png
 QUEST_COORDINATES = {
-    # Top Row
     "sweetbonanza1k": (13, 108, 461, 326),
-    "wanted": (465, 107, 912, 326),
-    "bigbass":    (918, 108, 1366, 326),
-
-    # Middle Row
-    "vampyparty":       (15, 331, 461, 547),
-    "mines":            (464, 331, 912, 547),
-    "towers":           (918, 331, 1366, 547),
-
-    # Bottom Row
-    "raptord":  (15, 555, 461, 774),
-    "crazytime":        (464, 552, 912, 771),
-    "outsourced":       (918, 552, 1366, 769),
+    "wanted":        (465, 107, 912, 326),
+    "bigbass":        (918, 108, 1366, 326),
+    "vampyparty":     (15, 331, 461, 547),
+    "mines":          (464, 331, 912, 547),
+    "towers":         (918, 331, 1366, 547),
+    "raptord":        (15, 555, 461, 774),
+    "crazytime":      (464, 552, 912, 771),
+    "outsourced":     (918, 552, 1366, 769),
 }
 
 # --- Flask Web Server Setup (Optional) ---
@@ -55,8 +49,8 @@ def home():
     return "Bot is alive and running!"
 
 def run_flask():
-  port = int(os.environ.get('PORT', 8080))
-  app.run(host='0.0.0.0', port=port)
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
 
 # --- Bot Logic ---
 def get_quest_data():
@@ -89,7 +83,6 @@ def generate_quest_image():
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         
-        # Make sure NotoColorEmoji-Regular.ttf is in the same folder!
         try:
             font_path = os.path.join(SCRIPT_DIR, "NotoColorEmoji-Regular.ttf")
             font = ImageFont.truetype(font_path, 30)
@@ -159,7 +152,6 @@ async def list_quests(ctx):
     available_quests = []
     for quest_name in QUEST_COORDINATES.keys():
         if quest_data.get(quest_name, {}).get('status') == 'unclaimed':
-            # Create a more readable display name for the embed
             display_name = ''.join([' ' + char if char.isupper() else char.title() for char in quest_name]).lstrip()
             available_quests.append(f"**{display_name}**\n`!claim {quest_name}`\n")
             
@@ -307,8 +299,8 @@ def run_bot():
         print("FATAL ERROR: DISCORD_TOKEN not found in environment variables.")
 
 if __name__ == "__main__":
-    # If you need the web server for uptime monitoring, uncomment the following lines
-    # flask_thread = Thread(target=run_flask)
-    # flask_thread.daemon = True
-    # flask_thread.start()
+    # The web server is required for hosting platforms like Render.
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     run_bot()
