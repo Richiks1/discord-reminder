@@ -25,26 +25,23 @@ intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # --- Path Configuration (Robust Version) ---
-# This makes the bot always know where its files are.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 QUEST_DATA_FILE = os.path.join(SCRIPT_DIR, 'quests.json')
 BASE_IMAGE_FILE = os.path.join(SCRIPT_DIR, 'questboard.png')
 
-# --- Quest Data and Image Coordinates ---
+# --- Quest Data and Image Coordinates (UPDATED) ---
 QUEST_COORDINATES = {
-    "sweet1": (42, 174, 453, 368),
-    "wanted":   (476, 173, 886, 371),
-    "bigbass":  (911, 176, 1318, 365),
-    "vampy":    (42, 387, 454, 584),
-    "mines":    (476, 391, 883, 578),
-    "towers":   (910, 392, 1312, 578),
-    "sweet2":   (43, 605, 447, 791),
-    "sweet3":   (473, 603, 886, 796),
-    "sweet4":   (909, 603, 1317, 798),
+    "sweet1": (13, 108, 461, 326),
+    "wanted":   (465, 107, 912, 326),
+    "bigbass":  (918, 108, 1366, 326),
+    "vampy":    (15, 331, 461, 547),
+    "mines":    (464, 331, 912, 547),
+    "towers":   (918, 331, 1366, 547),
+    "sweet2":   (15, 555, 461, 774),
+    "sweet3":   (464, 552, 912, 771),
+    "sweet4":   (918, 552, 1366, 769),
 }
 
-# --- Define the fixed size for your overlay images ---
-FIXED_OVERLAY_SIZE = (400, 200)
 
 # Quest Statuses Color
 LEGACY_COMPLETED_COLOR = (255, 0, 0, 255)
@@ -90,13 +87,14 @@ def generate_quest_image():
     if not os.path.exists(BASE_IMAGE_FILE):
         print(f"Error: Base image not found at path: {BASE_IMAGE_FILE}")
         return None
-    
+
     with Image.open(BASE_IMAGE_FILE) as base_img:
         img = base_img.copy().convert("RGBA")
         text_draw = ImageDraw.Draw(img)
         font_path = os.path.join(SCRIPT_DIR, "arial.ttf")
         try:
-            font = ImageFont.truetype(font_path, 20)
+            # Increased font size for better visibility
+            font = ImageFont.truetype(font_path, 30)
         except IOError:
             print(f"WARNING: Font not found at {font_path}. Using default font.")
             font = ImageFont.load_default()
@@ -109,50 +107,41 @@ def generate_quest_image():
             coords = QUEST_COORDINATES.get(name)
             if not coords: continue
 
-            overlay_filename = None
+            # --- MODIFIED SECTION ---
+            text_to_draw = None
             if status == 'pending':
-                overlay_filename = 'requested_overlay.png'
+                claimer_name = data.get('claimer_name', 'Unknown')
+                text_to_draw = f"Requested and under by {claimer_name}"
             elif status == 'completed':
-                overlay_filename = 'completed_overlay.png'
-            
-            if overlay_filename:
-                overlay_path = os.path.join(SCRIPT_DIR, overlay_filename)
-                x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
-                box_coords, box_width, box_height = (x1, y1, x2, y2), x2 - x1, y2 - y1
-                
+                text_to_draw = "Completed ✅"
+
+            if text_to_draw:
+                # Define coordinates and dimensions of the quest box
+                x1, y1, x2, y2 = coords
+                box_coords = (x1, y1, x2, y2)
+                box_width = x2 - x1
+                box_height = y2 - y1
+
+                # Apply blur and a darkening layer to the area
                 blurred_box = img.crop(box_coords).filter(ImageFilter.GaussianBlur(radius=5))
                 img.paste(blurred_box, box_coords)
                 darken_layer = Image.new('RGBA', (box_width, box_height), (0, 0, 0, 96))
                 img.paste(darken_layer, box_coords, darken_layer)
-                
-                # --- This is the new logic to draw the user's name ---
-                claimer_name = data.get('claimer_name')
-                text_to_draw = f"by {claimer_name}" if claimer_name else ""
-                
-                text_bbox = text_draw.textbbox((0,0), text_to_draw, font=font)
+
+                # Calculate text size and position to center it
+                text_bbox = text_draw.textbbox((0, 0), text_to_draw, font=font)
                 text_width = text_bbox[2] - text_bbox[0]
                 text_height = text_bbox[3] - text_bbox[1]
+                text_x = x1 + (box_width - text_width) // 2
+                text_y = y1 + (box_height - text_height) // 2
 
-                overlay_paste_x = x1 + (box_width - FIXED_OVERLAY_SIZE[0]) // 2
-                overlay_paste_y = y1 + (box_height - FIXED_OVERLAY_SIZE[1]) // 2 - (text_height // 2)
-                
-                try:
-                    with Image.open(overlay_path) as overlay_img_file:
-                        overlay_img = overlay_img_file.copy().convert("RGBA")
-                        overlay_img = overlay_img.resize(FIXED_OVERLAY_SIZE, Image.Resampling.LANCZOS)
-                        img.paste(overlay_img, (overlay_paste_x, overlay_paste_y), overlay_img)
-                except FileNotFoundError:
-                    print(f"ERROR: Overlay image not found at path: {overlay_path}")
-                
-                if claimer_name:
-                    text_x = x1 + (box_width - text_width) // 2
-                    text_y = overlay_paste_y + FIXED_OVERLAY_SIZE[1] - 50
-                    text_draw.text((text_x, text_y), text_to_draw, font=font, fill=(255, 255, 255, 200))
+                # Draw the text in white
+                text_draw.text((text_x, text_y), text_to_draw, font=font, fill=(255, 255, 255, 230))
 
             elif status == 'completed_legacy':
-                x1, y1, x2, y2 = min(coords[0], coords[2]), min(coords[1], coords[3]), max(coords[0], coords[2]), max(coords[1], coords[3])
-                draw_x.line([(x1+30, y1+30), (x2-30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
-                draw_x.line([(x2-30, y1+30), (x1+30, y2-30)], fill=LEGACY_COMPLETED_COLOR, width=25)
+                x1, y1, x2, y2 = coords
+                draw_x.line([(x1 + 30, y1 + 30), (x2 - 30, y2 - 30)], fill=LEGACY_COMPLETED_COLOR, width=25)
+                draw_x.line([(x2 - 30, y1 + 30), (x1 + 30, y2 - 30)], fill=LEGACY_COMPLETED_COLOR, width=25)
 
         img = Image.alpha_composite(img, x_overlay)
         buffer = io.BytesIO()
@@ -193,14 +182,15 @@ async def claim_quest(ctx, quest_name: str, proof_link: str = None):
     quest_name = quest_name.lower()
     quest_data = get_quest_data()
     if quest_name not in quest_data:
-        await ctx.send(f"'{quest_name}' is not a valid quest name.")
+        valid_quests = ", ".join(QUEST_COORDINATES.keys())
+        await ctx.send(f"'{quest_name}' is not a valid quest name. Valid quests are: {valid_quests}")
         return
     if not ctx.message.attachments and proof_link is None:
         await ctx.send("You must attach proof or provide a replay link.")
         return
     quest_info = quest_data[quest_name]
     if quest_info['status'] != 'unclaimed':
-        await ctx.send(f"Sorry, quest '{quest_name}' is already claimed.")
+        await ctx.send(f"Sorry, quest '{quest_name}' is already claimed or completed.")
         return
     quest_info['status'] = 'pending'
     quest_info['claimer_id'] = ctx.author.id
