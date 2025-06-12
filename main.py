@@ -34,7 +34,7 @@ BASE_IMAGE_FILE = os.path.join(SCRIPT_DIR, 'questboard.png')
 QUEST_COORDINATES = {
     # Top Row
     "sweetbonanza1k": (13, 108, 461, 326),
-    "wantedd": (465, 107, 912, 326),
+    "wanted": (465, 107, 912, 326),
     "bigbass":    (918, 108, 1366, 326),
 
     # Middle Row
