@@ -6,8 +6,9 @@ from discord.ext.commands import CheckFailure
 from flask import Flask
 from threading import Thread
 
-# === CONFIG (IDs are hardcoded as requested) ===
-TOKEN = "YOUR_BOT_TOKEN_HERE" # <--- IMPORTANT: PASTE YOUR BOT TOKEN HERE
+# === CONFIG ===
+# This now correctly reads the token from your Render environment variables
+TOKEN = os.getenv("DISCORD_BOT_TOKEN") # <-- THIS LINE IS NOW FIXED
 SHARK_ROLE_ID = 1383481768618758205
 APPROVAL_CHANNEL_ID = 1382357500661207170
 
@@ -150,7 +151,7 @@ async def uid(ctx, member: discord.Member, bitunix_uid: str):
     approval_embed.add_field(name="Bitunix UID", value=f"`{bitunix_uid}`", inline=True)
     approval_embed.add_field(name="Anfrage von", value=ctx.author.mention, inline=False)
     approval_embed.set_footer(text=f"Member: {member.id} | Ticket: {ctx.channel.id} | UID: {bitunix_uid}")
-    await approval_channel.send(embed=embed, view=ApprovalView())
+    await approval_channel.send(embed=approval_embed, view=ApprovalView())
 
     confirmation_embed = discord.Embed(title="✅ Anfrage zur Überprüfung eingereicht", description=f"Die Anfrage für die **Shark Rolle** für den Benutzer {member.mention} wurde erfolgreich an das Team weitergeleitet.", color=discord.Color.green())
     confirmation_embed.add_field(name="Eingereichte Bitunix UID", value=f"`{bitunix_uid}`", inline=False)
@@ -181,8 +182,8 @@ if __name__ == "__main__":
     web_thread.start()
 
     # Run the bot
-    if TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("!!! FATAL ERROR: Please paste your bot token into the script. !!!")
+    if not TOKEN:
+        print("!!! FATAL ERROR: DISCORD_BOT_TOKEN environment variable not found. !!!")
     else:
         try:
             bot.run(TOKEN)
